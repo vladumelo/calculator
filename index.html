@@ -7,32 +7,82 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="page">
-      <header class="page-header card">
+    <main class="app">
+      <header class="card header">
         <h1>Калькулятор покрытий по изображению</h1>
-        <p>Чистая основная страница + отдельный полноэкранный редактор плана.</p>
+        <div id="statusBar" class="status-bar">Готово к работе.</div>
       </header>
 
-      <section class="card upload-card">
-        <label>Изображение плана
-          <input id="imageInput" type="file" accept="image/*" />
-        </label>
-        <button id="openEditorBtn" type="button">Открыть план в редакторе</button>
-      </section>
+      <section class="workspace">
+        <aside class="card tools">
+          <h3>Инструменты</h3>
 
-      <section class="card">
-        <h2>Покрытия</h2>
-        <table>
-          <thead><tr><th>№</th><th>Название</th><th>Цвет</th><th>₽/м²</th></tr></thead>
-          <tbody id="materialsTable"></tbody>
-        </table>
-        <div class="add-material">
-          <input id="mNumber" placeholder="№" />
-          <input id="mName" placeholder="Название" />
-          <input id="mColor" type="color" value="#3b82f6" />
-          <input id="mPrice" type="number" min="0" step="1" value="1000" />
-          <button id="addMaterial">Добавить покрытие</button>
-        </div>
+          <div class="tool-group">
+            <h4>Файл и покрытие</h4>
+            <label>Изображение плана
+              <input id="imageInput" type="file" accept="image/*" />
+            </label>
+            <label>Текущее покрытие
+              <select id="materialSelect"></select>
+            </label>
+            <label>Реальная дистанция, м
+              <input id="realDistanceInput" type="number" min="0.01" step="0.01" value="10" />
+            </label>
+          </div>
+
+          <div class="tool-group">
+            <h4>Режимы</h4>
+            <button id="toolDrawPoints" title="Рисование по точкам">Точки</button>
+            <button id="toolFreehand" title="Свободная форма мышью">Свободная форма</button>
+            <button id="toolScale" title="Масштаб по 2 точкам">Масштаб</button>
+            <button id="toolSelect" title="Выбор участка">Выбор</button>
+            <button id="toolPan" title="Режим панорамирования">Рука</button>
+          </div>
+
+          <div class="tool-group">
+            <h4>Контур</h4>
+            <button id="undoPoint">Удалить последнюю точку</button>
+            <button id="clearContour">Очистить контур</button>
+            <button id="closeContour">Замкнуть контур</button>
+            <button id="deleteSelected">Удалить выбранный участок</button>
+          </div>
+
+          <div class="tool-group">
+            <h4>Вид</h4>
+            <button id="zoomIn">Zoom +</button>
+            <button id="zoomOut">Zoom −</button>
+            <button id="zoom100">100%</button>
+            <button id="fitView">Вписать</button>
+            <button id="resetView">Сбросить вид</button>
+          </div>
+        </aside>
+
+        <section class="card canvas-card">
+          <canvas id="canvas"></canvas>
+          <div class="canvas-meta">
+            <span id="scaleInfo">Масштаб не задан</span>
+            <span id="zoomInfo">Zoom: 100%</span>
+            <span id="cursorInfo">X: — Y: —</span>
+          </div>
+        </section>
+
+        <aside class="card side">
+          <h3>Покрытия</h3>
+          <table>
+            <thead><tr><th>№</th><th>Название</th><th>Цвет</th><th>₽/м²</th></tr></thead>
+            <tbody id="materialsTable"></tbody>
+          </table>
+          <div class="add-material">
+            <input id="mNumber" placeholder="№" />
+            <input id="mName" placeholder="Название" />
+            <input id="mColor" type="color" value="#3b82f6" />
+            <input id="mPrice" type="number" min="0" step="1" value="1000" />
+            <button id="addMaterial">Добавить покрытие</button>
+          </div>
+
+          <h3>Выбранный участок</h3>
+          <div id="selectedInfo" class="hint">Не выбран.</div>
+        </aside>
       </section>
 
       <section class="card">
@@ -48,62 +98,6 @@
         </table>
       </section>
     </main>
-
-    <section id="editorOverlay" class="editor-overlay hidden" aria-hidden="true">
-      <div class="editor-shell">
-        <header class="editor-topbar">
-          <div>
-            <strong>Редактор плана</strong>
-            <span id="scaleInfo">Масштаб не задан</span>
-          </div>
-          <div class="editor-top-actions">
-            <span id="zoomInfo">Zoom: 100%</span>
-            <span id="cursorInfo">X: — Y: —</span>
-            <button id="toggleToolsBtn" type="button">Свернуть панель</button>
-            <button id="closeEditorBtn" type="button">Закрыть редактор</button>
-          </div>
-        </header>
-
-        <div class="editor-body">
-          <aside id="editorTools" class="editor-tools">
-            <div class="tool-section">
-              <h3>Режимы</h3>
-              <button id="toolDraw" title="Рисование">Рисование</button>
-              <button id="toolScale" title="Масштаб по 2 точкам">Масштаб</button>
-              <button id="toolPan" title="Рука / панорамирование">Рука</button>
-              <button id="toolSelect" title="Выбор участка">Выбор</button>
-              <label>Реальная дистанция, м
-                <input id="realDistanceInput" type="number" min="0.01" step="0.01" value="10" />
-              </label>
-              <label>Текущее покрытие
-                <select id="materialSelect"></select>
-              </label>
-            </div>
-
-            <div class="tool-section">
-              <h3>Контур</h3>
-              <button id="undoPoint">Отменить точку</button>
-              <button id="clearContour">Очистить контур</button>
-              <button id="closeContour">Замкнуть контур</button>
-              <button id="deleteSelected">Удалить участок</button>
-            </div>
-
-            <div class="tool-section">
-              <h3>Навигация</h3>
-              <button id="zoomIn">Увеличить +</button>
-              <button id="zoomOut">Уменьшить −</button>
-              <button id="zoom100">100%</button>
-              <button id="fitView">Вписать</button>
-              <button id="resetView">Сбросить вид</button>
-            </div>
-          </aside>
-
-          <section class="editor-canvas-wrap">
-            <canvas id="canvas"></canvas>
-          </section>
-        </div>
-      </div>
-    </section>
 
     <script src="app.js"></script>
   </body>

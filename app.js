@@ -1,7 +1,8 @@
 const state = {
-  mode: 'draw', // draw | scale | pan | select
+  mode: 'draw_points', // draw_points | freehand | scale | select | pan
   isSpacePan: false,
   panning: false,
+  freehandDrawing: false,
   selectedSegmentId: null,
   image: { el: new Image(), loaded: false, width: 0, height: 0 },
   viewport: { zoom: 1, minZoom: 0.2, maxZoom: 12, offsetX: 0, offsetY: 0 },
@@ -17,31 +18,28 @@ const state = {
   segments: [],
   nextId: 1,
   panStart: null,
-  panButton: null,
 };
 
 const el = {
-  imageInput: document.getElementById('imageInput'),
-  openEditorBtn: document.getElementById('openEditorBtn'),
-  closeEditorBtn: document.getElementById('closeEditorBtn'),
-  editorOverlay: document.getElementById('editorOverlay'),
-  editorTools: document.getElementById('editorTools'),
-  toggleToolsBtn: document.getElementById('toggleToolsBtn'),
-
   canvas: document.getElementById('canvas'),
+  statusBar: document.getElementById('statusBar'),
+  imageInput: document.getElementById('imageInput'),
   materialSelect: document.getElementById('materialSelect'),
   materialsTable: document.getElementById('materialsTable'),
   estimateBody: document.getElementById('estimateBody'),
   estimateTotal: document.getElementById('estimateTotal'),
+  selectedInfo: document.getElementById('selectedInfo'),
   scaleInfo: document.getElementById('scaleInfo'),
   zoomInfo: document.getElementById('zoomInfo'),
   cursorInfo: document.getElementById('cursorInfo'),
-
   realDistanceInput: document.getElementById('realDistanceInput'),
-  toolDraw: document.getElementById('toolDraw'),
+
+  toolDrawPoints: document.getElementById('toolDrawPoints'),
+  toolFreehand: document.getElementById('toolFreehand'),
   toolScale: document.getElementById('toolScale'),
-  toolPan: document.getElementById('toolPan'),
   toolSelect: document.getElementById('toolSelect'),
+  toolPan: document.getElementById('toolPan'),
+
   undoPoint: document.getElementById('undoPoint'),
   clearContour: document.getElementById('clearContour'),
   closeContour: document.getElementById('closeContour'),
@@ -149,15 +147,51 @@ function recalcAll() { state.segments.forEach(recalcSegment); }
 function drawPolygon(points, color, close = true, fill = false, w = 2) {
   if (!points.length) return;
   const p0 = imageToCanvas(points[0]);
-  ctx.beginPath(); ctx.moveTo(p0.x, p0.y);
-  points.slice(1).forEach((p) => { const s = imageToCanvas(p); ctx.lineTo(s.x, s.y); });
+  ctx.beginPath();
+  ctx.moveTo(p0.x, p0.y);
+  points.slice(1).forEach((p) => {
+    const s = imageToCanvas(p);
+    ctx.lineTo(s.x, s.y);
+  });
   if (close) ctx.closePath();
   if (fill) { ctx.fillStyle = color; ctx.fill(); }
-  ctx.strokeStyle = color; ctx.lineWidth = w; ctx.stroke();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = w;
+  ctx.stroke();
 }
 function drawPoint(p, color, r = 4) {
   const s = imageToCanvas(p);
-  ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+  ctx.beginPath();
+  ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function updateStatusBar() {
+  const modeText = {
+    draw_points: 'Режим: точки',
+    freehand: 'Режим: свободная форма',
+    scale: 'Режим: масштаб',
+    select: 'Режим: выбор',
+    pan: 'Режим: панорамирование',
+  }[state.mode];
+  el.statusBar.textContent = `${modeText}. ПКМ + перетаскивание = pan, колесо = zoom.`;
+}
+function updateScaleInfo() {
+  if (!state.scale.metersPerPixel) {
+    el.scaleInfo.textContent = 'Масштаб не задан';
+    return;
+  }
+  el.scaleInfo.textContent = `1 px = ${fmtN(state.scale.metersPerPixel, 5)} м | 1 px² = ${fmtN(state.scale.metersPerPixel ** 2, 7)} м²`;
+}
+function updateSelectedInfo() {
+  const s = state.segments.find((x) => x.id === state.selectedSegmentId);
+  if (!s) {
+    el.selectedInfo.textContent = 'Не выбран.';
+    return;
+  }
+  const m = getMaterial(s.materialId);
+  el.selectedInfo.textContent = `${s.label}: ${m?.name || '-'} | S=${fmtN(s.area)} м² | P=${fmtN(s.perimeter)} м`;
 }
 
 function render() {
@@ -187,10 +221,11 @@ function render() {
 
   if (state.currentContour.length) {
     drawPolygon(state.currentContour, '#3b82f6', false, false, 2);
-    state.currentContour.forEach((p) => drawPoint(p, '#3b82f6', 4));
+    state.currentContour.forEach((p) => drawPoint(p, '#3b82f6', 3));
   }
 
   el.zoomInfo.textContent = `Zoom: ${Math.round(state.viewport.zoom * 100)}%`;
+  updateSelectedInfo();
 }
 
 function renderMaterials() {
@@ -209,11 +244,9 @@ function renderMaterials() {
     el.materialsTable.appendChild(tr);
   });
 }
-
 function materialSelectHTML(selectedId) {
   return `<select data-field="materialId">${state.materials.map((m) => `<option value="${m.id}" ${m.id === selectedId ? 'selected' : ''}>${m.name}</option>`).join('')}</select>`;
 }
-
 function renderEstimate() {
   el.estimateBody.innerHTML = '';
   let sum = 0;
@@ -221,6 +254,7 @@ function renderEstimate() {
   state.segments.forEach((s) => {
     const m = getMaterial(s.materialId);
     sum += s.total;
+
     const tr = document.createElement('tr');
     tr.dataset.id = String(s.id);
     if (s.id === state.selectedSegmentId) tr.classList.add('selected-row');
@@ -237,7 +271,8 @@ function renderEstimate() {
         <button data-action="duplicate" type="button">Дублировать</button>
         <button data-action="reset" type="button">Сброс</button>
         <button data-action="remove" type="button">Удалить</button>
-      </td>`;
+      </td>
+    `;
 
     el.estimateBody.appendChild(tr);
   });
@@ -245,69 +280,27 @@ function renderEstimate() {
   el.estimateTotal.textContent = fmtM(sum);
 }
 
-function updateScaleInfo() {
-  if (!state.scale.metersPerPixel) {
-    el.scaleInfo.textContent = 'Масштаб не задан';
-    return;
-  }
-  el.scaleInfo.textContent = `1 px = ${fmtN(state.scale.metersPerPixel, 5)} м | 1 px² = ${fmtN(state.scale.metersPerPixel ** 2, 7)} м²`;
-}
-
 function setMode(mode) {
   state.mode = mode;
-  el.toolDraw.classList.toggle('active-tool', mode === 'draw');
+  el.toolDrawPoints.classList.toggle('active-tool', mode === 'draw_points');
+  el.toolFreehand.classList.toggle('active-tool', mode === 'freehand');
   el.toolScale.classList.toggle('active-tool', mode === 'scale');
-  el.toolPan.classList.toggle('active-tool', mode === 'pan' || state.isSpacePan);
   el.toolSelect.classList.toggle('active-tool', mode === 'select');
+  el.toolPan.classList.toggle('active-tool', mode === 'pan' || state.isSpacePan);
   el.canvas.classList.toggle('pan', mode === 'pan' || state.isSpacePan);
+  updateStatusBar();
 }
 
-function pickSegment(clientX, clientY) {
-  const p = canvasToImage(clientToCanvas(clientX, clientY));
-  for (let i = state.segments.length - 1; i >= 0; i -= 1) {
-    if (pointInPolygon(p, state.segments[i].points)) return state.segments[i].id;
-  }
-  return null;
-}
-
-function addPoint(clientX, clientY) {
-  if (!state.image.loaded) return;
-  const p = canvasToImage(clientToCanvas(clientX, clientY));
-
-  if (state.mode === 'scale') {
-    if (state.scale.points.length === 2) {
-      state.scale.points = [];
-      state.scale.metersPerPixel = null;
-    }
-    state.scale.points.push(p);
-    if (state.scale.points.length === 2) {
-      const px = dist(state.scale.points[0], state.scale.points[1]);
-      const m = Number(el.realDistanceInput.value);
-      if (px && m > 0) {
-        state.scale.metersPerPixel = m / px;
-        recalcAll();
-        updateScaleInfo();
-        renderEstimate();
-        setMode('draw');
-      }
-    }
-    render();
-    return;
-  }
-
-  if (state.mode === 'draw') {
-    state.currentContour.push(p);
-    render();
-  }
-}
-
-function closeContour() {
-  if (state.currentContour.length < 3) {
-    alert('Нельзя замкнуть контур меньше чем с 3 точками.');
+function createSegmentFromContour(points) {
+  if (points.length < 3) {
     return;
   }
   if (!state.scale.metersPerPixel) {
-    alert('Нельзя считать без масштаба.');
+    alert('Нельзя считать площадь без масштаба.');
+    return;
+  }
+  if (!state.activeMaterialId) {
+    alert('Выберите покрытие.');
     return;
   }
 
@@ -315,7 +308,7 @@ function closeContour() {
     id: state.nextId,
     label: `Участок ${state.nextId}`,
     materialId: state.activeMaterialId,
-    points: state.currentContour.map((p) => ({ ...p })),
+    points: points.map((p) => ({ ...p })),
     overrides: { areaManual: false, perimeterManual: false, priceManual: false },
     baseArea: 0,
     basePerimeter: 0,
@@ -334,26 +327,71 @@ function closeContour() {
   render();
 }
 
-function openEditor() {
-  el.editorOverlay.classList.remove('hidden');
-  el.editorOverlay.setAttribute('aria-hidden', 'false');
-  setTimeout(() => {
-    syncCanvasSize();
-    if (state.image.loaded) fitToScreen();
-  }, 0);
-}
-function closeEditor() {
-  el.editorOverlay.classList.add('hidden');
-  el.editorOverlay.setAttribute('aria-hidden', 'true');
+function pickSegment(clientX, clientY) {
+  const p = canvasToImage(clientToCanvas(clientX, clientY));
+  for (let i = state.segments.length - 1; i >= 0; i -= 1) {
+    if (pointInPolygon(p, state.segments[i].points)) return state.segments[i].id;
+  }
+  return null;
 }
 
-el.openEditorBtn.addEventListener('click', openEditor);
-el.closeEditorBtn.addEventListener('click', closeEditor);
-el.toggleToolsBtn.addEventListener('click', () => {
-  el.editorTools.classList.toggle('collapsed');
-  el.toggleToolsBtn.textContent = el.editorTools.classList.contains('collapsed') ? 'Показать панель' : 'Свернуть панель';
-  setTimeout(syncCanvasSize, 10);
-});
+function addPointOrScale(clientX, clientY) {
+  if (!state.image.loaded) return;
+  const p = canvasToImage(clientToCanvas(clientX, clientY));
+
+  if (state.mode === 'scale') {
+    if (state.scale.points.length === 2) {
+      state.scale.points = [];
+      state.scale.metersPerPixel = null;
+    }
+    state.scale.points.push(p);
+    if (state.scale.points.length === 2) {
+      const px = dist(state.scale.points[0], state.scale.points[1]);
+      const m = Number(el.realDistanceInput.value);
+      if (px && m > 0) {
+        state.scale.metersPerPixel = m / px;
+        recalcAll();
+        updateScaleInfo();
+        renderEstimate();
+      }
+    }
+    render();
+    return;
+  }
+
+  if (state.mode === 'draw_points') {
+    state.currentContour.push(p);
+    render();
+  }
+}
+
+function startFreehand(clientX, clientY) {
+  if (!state.image.loaded) return;
+  state.freehandDrawing = true;
+  const p = canvasToImage(clientToCanvas(clientX, clientY));
+  state.currentContour = [p];
+  render();
+}
+function moveFreehand(clientX, clientY) {
+  if (!state.freehandDrawing) return;
+  const p = canvasToImage(clientToCanvas(clientX, clientY));
+  const last = state.currentContour[state.currentContour.length - 1];
+  const minDistanceImagePx = 4;
+  if (!last || dist(last, p) >= minDistanceImagePx) {
+    state.currentContour.push(p);
+    render();
+  }
+}
+function endFreehand() {
+  if (!state.freehandDrawing) return;
+  state.freehandDrawing = false;
+  if (state.currentContour.length >= 3) {
+    createSegmentFromContour(state.currentContour);
+  } else {
+    state.currentContour = [];
+    render();
+  }
+}
 
 el.imageInput.addEventListener('change', (e) => {
   const file = e.target.files?.[0];
@@ -370,14 +408,21 @@ el.imageInput.addEventListener('change', (e) => {
     state.scale = { metersPerPixel: null, points: [] };
     updateScaleInfo();
     renderEstimate();
-    openEditor();
+    fitToScreen();
   };
   state.image.el.src = url;
 });
 
+el.materialSelect.addEventListener('change', (e) => {
+  state.activeMaterialId = e.target.value;
+  updateStatusBar();
+});
 el.addMaterial.addEventListener('click', () => {
   const name = el.mName.value.trim();
-  if (!name) { alert('Нельзя добавить материал без названия.'); return; }
+  if (!name) {
+    alert('Нельзя добавить покрытие без названия.');
+    return;
+  }
   const id = `m${Date.now()}`;
   state.materials.push({
     id,
@@ -392,15 +437,27 @@ el.addMaterial.addEventListener('click', () => {
   renderEstimate();
 });
 
-el.materialSelect.addEventListener('change', (e) => { state.activeMaterialId = e.target.value; });
-
-el.toolDraw.addEventListener('click', () => setMode('draw'));
+el.toolDrawPoints.addEventListener('click', () => setMode('draw_points'));
+el.toolFreehand.addEventListener('click', () => setMode('freehand'));
 el.toolScale.addEventListener('click', () => setMode('scale'));
-el.toolPan.addEventListener('click', () => setMode('pan'));
 el.toolSelect.addEventListener('click', () => setMode('select'));
-el.undoPoint.addEventListener('click', () => { state.currentContour.pop(); render(); });
-el.clearContour.addEventListener('click', () => { state.currentContour = []; render(); });
-el.closeContour.addEventListener('click', closeContour);
+el.toolPan.addEventListener('click', () => setMode('pan'));
+
+el.undoPoint.addEventListener('click', () => {
+  state.currentContour.pop();
+  render();
+});
+el.clearContour.addEventListener('click', () => {
+  state.currentContour = [];
+  render();
+});
+el.closeContour.addEventListener('click', () => {
+  if (state.currentContour.length < 3) {
+    alert('Нельзя замкнуть контур меньше чем с 3 точками.');
+    return;
+  }
+  createSegmentFromContour(state.currentContour);
+});
 el.deleteSelected.addEventListener('click', () => {
   if (state.selectedSegmentId == null) return;
   state.segments = state.segments.filter((s) => s.id !== state.selectedSegmentId);
@@ -408,63 +465,53 @@ el.deleteSelected.addEventListener('click', () => {
   renderEstimate();
   render();
 });
+
 el.zoomIn.addEventListener('click', () => zoomBy(1.2));
 el.zoomOut.addEventListener('click', () => zoomBy(0.83));
-el.zoom100.addEventListener('click', () => { state.viewport.zoom = 1; render(); });
+el.zoom100.addEventListener('click', () => {
+  state.viewport.zoom = 1;
+  render();
+});
 el.fitView.addEventListener('click', fitToScreen);
 el.resetView.addEventListener('click', fitToScreen);
 
 el.canvas.addEventListener('mousedown', (e) => {
-  // Правая кнопка всегда = временный pan (независимо от режима)
+  // ПКМ всегда pan и не рисует
   if (e.button === 2) {
     e.preventDefault();
     state.panning = true;
-    state.panButton = 2;
     state.panStart = { x: e.clientX, y: e.clientY, ox: state.viewport.offsetX, oy: state.viewport.offsetY };
     el.canvas.classList.add('panning');
     return;
   }
 
-  // Средняя кнопка тоже может панорамировать
-  if (e.button === 1) {
-    e.preventDefault();
-    state.panning = true;
-    state.panButton = 1;
-    state.panStart = { x: e.clientX, y: e.clientY, ox: state.viewport.offsetX, oy: state.viewport.offsetY };
-    el.canvas.classList.add('panning');
-    return;
-  }
-
-  // Логика рисования/выбора — только левая кнопка
-  if (e.button !== 0) {
-    return;
-  }
+  // Только ЛКМ для рисования/выбора
+  if (e.button !== 0) return;
 
   const panNow = state.mode === 'pan' || state.isSpacePan;
   if (panNow) {
     state.panning = true;
-    state.panButton = 0;
     state.panStart = { x: e.clientX, y: e.clientY, ox: state.viewport.offsetX, oy: state.viewport.offsetY };
     el.canvas.classList.add('panning');
     return;
   }
 
-  const hit = pickSegment(e.clientX, e.clientY);
-  if (state.mode === 'select' && hit) {
-    state.selectedSegmentId = hit;
-    renderEstimate();
-    render();
+  if (state.mode === 'select') {
+    const hit = pickSegment(e.clientX, e.clientY);
+    if (hit) {
+      state.selectedSegmentId = hit;
+      renderEstimate();
+      render();
+    }
     return;
   }
 
-  if (hit && state.mode !== 'draw') {
-    state.selectedSegmentId = hit;
-    renderEstimate();
-    render();
+  if (state.mode === 'freehand') {
+    startFreehand(e.clientX, e.clientY);
     return;
   }
 
-  addPoint(e.clientX, e.clientY);
+  addPointOrScale(e.clientX, e.clientY);
 });
 
 window.addEventListener('mousemove', (e) => {
@@ -472,22 +519,26 @@ window.addEventListener('mousemove', (e) => {
   const i = canvasToImage(c);
   el.cursorInfo.textContent = `X: ${fmtN(i.x, 1)} Y: ${fmtN(i.y, 1)}`;
 
-  if (!state.panning || !state.panStart) return;
-  state.viewport.offsetX = state.panStart.ox + (e.clientX - state.panStart.x);
-  state.viewport.offsetY = state.panStart.oy + (e.clientY - state.panStart.y);
-  render();
+  if (state.panning && state.panStart) {
+    state.viewport.offsetX = state.panStart.ox + (e.clientX - state.panStart.x);
+    state.viewport.offsetY = state.panStart.oy + (e.clientY - state.panStart.y);
+    render();
+    return;
+  }
+
+  if (state.freehandDrawing) {
+    moveFreehand(e.clientX, e.clientY);
+  }
 });
 window.addEventListener('mouseup', () => {
+  if (state.freehandDrawing) {
+    endFreehand();
+  }
   state.panning = false;
   state.panStart = null;
-  state.panButton = null;
   el.canvas.classList.remove('panning');
 });
-
-// Отключаем системное меню ПКМ внутри рабочей области редактора
-el.canvas.addEventListener('contextmenu', (e) => {
-  e.preventDefault();
-});
+el.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 el.canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
@@ -495,19 +546,31 @@ el.canvas.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 document.addEventListener('keydown', (e) => {
-  if (e.code === 'Space') { state.isSpacePan = true; setMode(state.mode); e.preventDefault(); }
-  if (e.key === 'Delete' || e.key === 'Backspace') { state.currentContour.pop(); render(); }
-  if (e.key === 'Enter') closeContour();
-  if (e.key === 'Escape') { if (!el.editorOverlay.classList.contains('hidden')) closeEditor(); }
+  if (e.code === 'Space') {
+    state.isSpacePan = true;
+    setMode(state.mode);
+    e.preventDefault();
+  }
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    state.currentContour.pop();
+    render();
+  }
+  if (e.key === 'Enter') {
+    if (state.currentContour.length >= 3) createSegmentFromContour(state.currentContour);
+  }
+  if (e.key === 'Escape') {
+    state.currentContour = [];
+    state.freehandDrawing = false;
+    render();
+  }
   if (e.key === '+' || e.key === '=') zoomBy(1.12);
   if (e.key === '-') zoomBy(0.89);
-  if (e.key.toLowerCase() === 'f') {
-    if (el.editorOverlay.classList.contains('hidden')) openEditor();
-    else closeEditor();
-  }
 });
 document.addEventListener('keyup', (e) => {
-  if (e.code === 'Space') { state.isSpacePan = false; setMode(state.mode); }
+  if (e.code === 'Space') {
+    state.isSpacePan = false;
+    setMode(state.mode);
+  }
 });
 
 el.estimateBody.addEventListener('click', (e) => {
@@ -545,10 +608,22 @@ el.estimateBody.addEventListener('input', (e) => {
   const field = e.target.dataset.field;
 
   if (field === 'label') s.label = e.target.value;
-  if (field === 'materialId') { s.materialId = e.target.value; s.overrides.priceManual = false; }
-  if (field === 'area') { s.area = Math.max(0, Number(e.target.value) || 0); s.overrides.areaManual = true; }
-  if (field === 'perimeter') { s.perimeter = Math.max(0, Number(e.target.value) || 0); s.overrides.perimeterManual = true; }
-  if (field === 'price') { s.price = Math.max(0, Number(e.target.value) || 0); s.overrides.priceManual = true; }
+  if (field === 'materialId') {
+    s.materialId = e.target.value;
+    s.overrides.priceManual = false;
+  }
+  if (field === 'area') {
+    s.area = Math.max(0, Number(e.target.value) || 0);
+    s.overrides.areaManual = true;
+  }
+  if (field === 'perimeter') {
+    s.perimeter = Math.max(0, Number(e.target.value) || 0);
+    s.overrides.perimeterManual = true;
+  }
+  if (field === 'price') {
+    s.price = Math.max(0, Number(e.target.value) || 0);
+    s.overrides.priceManual = true;
+  }
 
   recalcSegment(s);
   renderEstimate();
@@ -557,7 +632,7 @@ el.estimateBody.addEventListener('input', (e) => {
 
 window.addEventListener('resize', syncCanvasSize);
 
-setMode('draw');
+setMode('draw_points');
 renderMaterials();
 renderEstimate();
 updateScaleInfo();
