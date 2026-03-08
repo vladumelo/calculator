@@ -1,18 +1,17 @@
 const state = {
-  mode: 'draw_points', // draw_points | freehand | scale | select | pan
-  isSpacePan: false,
+  mode: 'polygon', // polygon | points | pan | scale
   panning: false,
   freehandDrawing: false,
   selectedSegmentId: null,
   image: { el: new Image(), loaded: false, width: 0, height: 0 },
-  viewport: { zoom: 1, minZoom: 0.2, maxZoom: 12, offsetX: 0, offsetY: 0 },
+  viewport: { zoom: 1, minZoom: 0.2, maxZoom: 14, offsetX: 0, offsetY: 0 },
   scale: { metersPerPixel: null, points: [] },
   currentContour: [],
   materials: [
-    { id: 'm1', number: '1', name: 'Асфальт', color: '#6b7280', price: 1650 },
-    { id: 'm2', number: '2', name: 'Бетон', color: '#94a3b8', price: 2200 },
-    { id: 'm3', number: '3', name: 'Газон', color: '#22c55e', price: 950 },
-    { id: 'm4', number: '4', name: 'Брусчатка', color: '#f59e0b', price: 2900 },
+    { id: 'm1', name: 'Асфальт', color: '#6b7280', price: 1650 },
+    { id: 'm2', name: 'Бетон', color: '#94a3b8', price: 2200 },
+    { id: 'm3', name: 'Газон', color: '#22c55e', price: 950 },
+    { id: 'm4', name: 'Брусчатка', color: '#f59e0b', price: 2900 },
   ],
   activeMaterialId: 'm1',
   segments: [],
@@ -22,39 +21,17 @@ const state = {
 
 const el = {
   canvas: document.getElementById('canvas'),
-  statusBar: document.getElementById('statusBar'),
   imageInput: document.getElementById('imageInput'),
+  setScaleBtn: document.getElementById('setScaleBtn'),
   materialSelect: document.getElementById('materialSelect'),
-  materialsTable: document.getElementById('materialsTable'),
+  exportBtn: document.getElementById('exportBtn'),
+  metaBar: document.getElementById('metaBar'),
   estimateBody: document.getElementById('estimateBody'),
   estimateTotal: document.getElementById('estimateTotal'),
-  selectedInfo: document.getElementById('selectedInfo'),
-  scaleInfo: document.getElementById('scaleInfo'),
-  zoomInfo: document.getElementById('zoomInfo'),
-  cursorInfo: document.getElementById('cursorInfo'),
-  realDistanceInput: document.getElementById('realDistanceInput'),
-
-  toolDrawPoints: document.getElementById('toolDrawPoints'),
-  toolFreehand: document.getElementById('toolFreehand'),
-  toolScale: document.getElementById('toolScale'),
-  toolSelect: document.getElementById('toolSelect'),
+  toolPolygon: document.getElementById('toolPolygon'),
+  toolPoints: document.getElementById('toolPoints'),
   toolPan: document.getElementById('toolPan'),
-
-  undoPoint: document.getElementById('undoPoint'),
-  clearContour: document.getElementById('clearContour'),
-  closeContour: document.getElementById('closeContour'),
-  deleteSelected: document.getElementById('deleteSelected'),
-  zoomIn: document.getElementById('zoomIn'),
-  zoomOut: document.getElementById('zoomOut'),
-  zoom100: document.getElementById('zoom100'),
-  fitView: document.getElementById('fitView'),
-  resetView: document.getElementById('resetView'),
-
-  addMaterial: document.getElementById('addMaterial'),
-  mNumber: document.getElementById('mNumber'),
-  mName: document.getElementById('mName'),
-  mColor: document.getElementById('mColor'),
-  mPrice: document.getElementById('mPrice'),
+  toolDelete: document.getElementById('toolDelete'),
 };
 
 const ctx = el.canvas.getContext('2d');
@@ -134,12 +111,12 @@ function zoomBy(factor, anchorCanvas = null) {
 function recalcSegment(s) {
   const m = getMaterial(s.materialId);
   const k = state.scale.metersPerPixel || 0;
-  s.baseArea = areaShoelace(s.points) * (k ** 2);
-  s.basePerimeter = perim(s.points) * k;
-  s.basePrice = m ? m.price : 0;
-  if (!s.overrides.areaManual) s.area = s.baseArea;
-  if (!s.overrides.perimeterManual) s.perimeter = s.basePerimeter;
-  if (!s.overrides.priceManual) s.price = s.basePrice;
+  const baseArea = areaShoelace(s.points) * (k ** 2);
+  const basePerim = perim(s.points) * k;
+  s.baseArea = baseArea;
+  s.basePerimeter = basePerim;
+  if (!s.areaManual) s.area = baseArea;
+  if (!s.priceManual) s.price = m ? m.price : 0;
   s.total = s.area * s.price;
 }
 function recalcAll() { state.segments.forEach(recalcSegment); }
@@ -159,7 +136,7 @@ function drawPolygon(points, color, close = true, fill = false, w = 2) {
   ctx.lineWidth = w;
   ctx.stroke();
 }
-function drawPoint(p, color, r = 4) {
+function drawPoint(p, color, r = 3.2) {
   const s = imageToCanvas(p);
   ctx.beginPath();
   ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
@@ -167,31 +144,15 @@ function drawPoint(p, color, r = 4) {
   ctx.fill();
 }
 
-function updateStatusBar() {
-  const modeText = {
-    draw_points: 'Режим: точки',
-    freehand: 'Режим: свободная форма',
-    scale: 'Режим: масштаб',
-    select: 'Режим: выбор',
-    pan: 'Режим: панорамирование',
-  }[state.mode];
-  el.statusBar.textContent = `${modeText}. ПКМ + перетаскивание = pan, колесо = zoom.`;
-}
-function updateScaleInfo() {
-  if (!state.scale.metersPerPixel) {
-    el.scaleInfo.textContent = 'Масштаб не задан';
-    return;
-  }
-  el.scaleInfo.textContent = `1 px = ${fmtN(state.scale.metersPerPixel, 5)} м | 1 px² = ${fmtN(state.scale.metersPerPixel ** 2, 7)} м²`;
-}
-function updateSelectedInfo() {
-  const s = state.segments.find((x) => x.id === state.selectedSegmentId);
-  if (!s) {
-    el.selectedInfo.textContent = 'Не выбран.';
-    return;
-  }
-  const m = getMaterial(s.materialId);
-  el.selectedInfo.textContent = `${s.label}: ${m?.name || '-'} | S=${fmtN(s.area)} м² | P=${fmtN(s.perimeter)} м`;
+function updateMeta(cursor = null) {
+  const zoom = `Zoom: ${Math.round(state.viewport.zoom * 100)}%`;
+  const scale = state.scale.metersPerPixel ? `Масштаб: 1px=${fmtN(state.scale.metersPerPixel, 5)}м` : 'Масштаб: —';
+  const contourArea = state.currentContour.length >= 3 && state.scale.metersPerPixel
+    ? areaShoelace(state.currentContour) * (state.scale.metersPerPixel ** 2)
+    : null;
+  const cur = cursor ? `Курсор: ${fmtN(cursor.x, 1)} / ${fmtN(cursor.y, 1)}` : 'Курсор: —';
+  const a = contourArea ? `Текущий участок: ${fmtN(contourArea, 2)} м²` : 'Текущий участок: —';
+  el.metaBar.textContent = `${scale} | ${zoom} | ${a} | ${cur}`;
 }
 
 function render() {
@@ -211,7 +172,7 @@ function render() {
   state.segments.forEach((s) => {
     const m = getMaterial(s.materialId);
     drawPolygon(s.points, `${m?.color || '#64748b'}55`, true, true, 2);
-    drawPolygon(s.points, s.id === state.selectedSegmentId ? '#22c55e' : (m?.color || '#64748b'), true, false, s.id === state.selectedSegmentId ? 3 : 2);
+    drawPolygon(s.points, s.id === state.selectedSegmentId ? '#2563eb' : (m?.color || '#64748b'), true, false, s.id === state.selectedSegmentId ? 3 : 2);
   });
 
   if (state.mode === 'scale') {
@@ -220,58 +181,45 @@ function render() {
   }
 
   if (state.currentContour.length) {
-    drawPolygon(state.currentContour, '#3b82f6', false, false, 2);
-    state.currentContour.forEach((p) => drawPoint(p, '#3b82f6', 3));
+    drawPolygon(state.currentContour, '#2563eb', false, false, 2);
+    state.currentContour.forEach((p) => drawPoint(p, '#60a5fa', 3));
   }
 
-  el.zoomInfo.textContent = `Zoom: ${Math.round(state.viewport.zoom * 100)}%`;
-  updateSelectedInfo();
+  el.canvas.classList.toggle('pan', state.mode === 'pan');
 }
 
-function renderMaterials() {
+function renderMaterialsSelect() {
   el.materialSelect.innerHTML = '';
-  el.materialsTable.innerHTML = '';
-
   state.materials.forEach((m) => {
     const opt = document.createElement('option');
     opt.value = m.id;
-    opt.textContent = `${m.number} — ${m.name}`;
+    opt.textContent = m.name;
     opt.selected = m.id === state.activeMaterialId;
     el.materialSelect.appendChild(opt);
-
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${m.number}</td><td>${m.name}</td><td><span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:${m.color}"></span></td><td>${fmtN(m.price)}</td>`;
-    el.materialsTable.appendChild(tr);
   });
 }
-function materialSelectHTML(selectedId) {
+
+function estimateMaterialSelectHTML(selectedId) {
   return `<select data-field="materialId">${state.materials.map((m) => `<option value="${m.id}" ${m.id === selectedId ? 'selected' : ''}>${m.name}</option>`).join('')}</select>`;
 }
+
 function renderEstimate() {
   el.estimateBody.innerHTML = '';
   let sum = 0;
 
   state.segments.forEach((s) => {
-    const m = getMaterial(s.materialId);
-    sum += s.total;
-
     const tr = document.createElement('tr');
     tr.dataset.id = String(s.id);
-    if (s.id === state.selectedSegmentId) tr.classList.add('selected-row');
+    if (s.id === state.selectedSegmentId) tr.classList.add('row-selected');
+    sum += s.total;
 
     tr.innerHTML = `
       <td><input data-field="label" value="${s.label}" /></td>
-      <td>${materialSelectHTML(s.materialId)}</td>
-      <td>${m?.number || '-'}</td>
-      <td><input data-field="area" type="number" step="0.01" value="${s.area.toFixed(2)}" class="${s.overrides.areaManual ? 'manual' : ''}" /></td>
-      <td><input data-field="perimeter" type="number" step="0.01" value="${s.perimeter.toFixed(2)}" class="${s.overrides.perimeterManual ? 'manual' : ''}" /></td>
-      <td><input data-field="price" type="number" step="1" value="${s.price.toFixed(2)}" class="${s.overrides.priceManual ? 'manual' : ''}" /></td>
+      <td>${estimateMaterialSelectHTML(s.materialId)}</td>
+      <td>${fmtN(s.area, 2)}</td>
+      <td><input data-field="price" type="number" step="1" value="${s.price.toFixed(2)}" /></td>
       <td>${fmtM(s.total)}</td>
-      <td class="inline-actions">
-        <button data-action="duplicate" type="button">Дублировать</button>
-        <button data-action="reset" type="button">Сброс</button>
-        <button data-action="remove" type="button">Удалить</button>
-      </td>
+      <td><button data-action="remove" type="button">✕</button></td>
     `;
 
     el.estimateBody.appendChild(tr);
@@ -282,25 +230,18 @@ function renderEstimate() {
 
 function setMode(mode) {
   state.mode = mode;
-  el.toolDrawPoints.classList.toggle('active-tool', mode === 'draw_points');
-  el.toolFreehand.classList.toggle('active-tool', mode === 'freehand');
-  el.toolScale.classList.toggle('active-tool', mode === 'scale');
-  el.toolSelect.classList.toggle('active-tool', mode === 'select');
-  el.toolPan.classList.toggle('active-tool', mode === 'pan' || state.isSpacePan);
-  el.canvas.classList.toggle('pan', mode === 'pan' || state.isSpacePan);
-  updateStatusBar();
+  el.toolPolygon.classList.toggle('active', mode === 'polygon');
+  el.toolPoints.classList.toggle('active', mode === 'points');
+  el.toolPan.classList.toggle('active', mode === 'pan');
 }
 
 function createSegmentFromContour(points) {
-  if (points.length < 3) {
-    return;
-  }
   if (!state.scale.metersPerPixel) {
-    alert('Нельзя считать площадь без масштаба.');
+    alert('Сначала задайте масштаб.');
     return;
   }
-  if (!state.activeMaterialId) {
-    alert('Выберите покрытие.');
+  if (points.length < 3) {
+    alert('Нужно минимум 3 точки.');
     return;
   }
 
@@ -309,19 +250,19 @@ function createSegmentFromContour(points) {
     label: `Участок ${state.nextId}`,
     materialId: state.activeMaterialId,
     points: points.map((p) => ({ ...p })),
-    overrides: { areaManual: false, perimeterManual: false, priceManual: false },
     baseArea: 0,
     basePerimeter: 0,
-    basePrice: 0,
     area: 0,
-    perimeter: 0,
+    areaManual: false,
     price: 0,
+    priceManual: false,
     total: 0,
   };
   recalcSegment(s);
+
+  state.nextId += 1;
   state.segments.push(s);
   state.selectedSegmentId = s.id;
-  state.nextId += 1;
   state.currentContour = [];
   renderEstimate();
   render();
@@ -340,18 +281,16 @@ function addPointOrScale(clientX, clientY) {
   const p = canvasToImage(clientToCanvas(clientX, clientY));
 
   if (state.mode === 'scale') {
-    if (state.scale.points.length === 2) {
-      state.scale.points = [];
-      state.scale.metersPerPixel = null;
-    }
+    if (state.scale.points.length === 2) state.scale.points = [];
     state.scale.points.push(p);
     if (state.scale.points.length === 2) {
       const px = dist(state.scale.points[0], state.scale.points[1]);
-      const m = Number(el.realDistanceInput.value);
-      if (px && m > 0) {
-        state.scale.metersPerPixel = m / px;
+      const meters = 10;
+      // scale distance set via prompt-like quick value from button action
+      const input = Number(prompt('Реальная дистанция в метрах:', '10'));
+      if (px && input > 0) {
+        state.scale.metersPerPixel = input / px;
         recalcAll();
-        updateScaleInfo();
         renderEstimate();
       }
     }
@@ -359,9 +298,13 @@ function addPointOrScale(clientX, clientY) {
     return;
   }
 
-  if (state.mode === 'draw_points') {
-    state.currentContour.push(p);
-    render();
+  if (state.mode === 'points') {
+    if (state.currentContour.length >= 3 && dist(state.currentContour[0], p) < 8 / state.viewport.zoom) {
+      createSegmentFromContour(state.currentContour);
+    } else {
+      state.currentContour.push(p);
+      render();
+    }
   }
 }
 
@@ -376,8 +319,7 @@ function moveFreehand(clientX, clientY) {
   if (!state.freehandDrawing) return;
   const p = canvasToImage(clientToCanvas(clientX, clientY));
   const last = state.currentContour[state.currentContour.length - 1];
-  const minDistanceImagePx = 4;
-  if (!last || dist(last, p) >= minDistanceImagePx) {
+  if (!last || dist(last, p) >= 3.5) {
     state.currentContour.push(p);
     render();
   }
@@ -385,12 +327,8 @@ function moveFreehand(clientX, clientY) {
 function endFreehand() {
   if (!state.freehandDrawing) return;
   state.freehandDrawing = false;
-  if (state.currentContour.length >= 3) {
-    createSegmentFromContour(state.currentContour);
-  } else {
-    state.currentContour = [];
-    render();
-  }
+  if (state.currentContour.length >= 3) createSegmentFromContour(state.currentContour);
+  else state.currentContour = [];
 }
 
 el.imageInput.addEventListener('change', (e) => {
@@ -406,59 +344,36 @@ el.imageInput.addEventListener('change', (e) => {
     state.selectedSegmentId = null;
     state.nextId = 1;
     state.scale = { metersPerPixel: null, points: [] };
-    updateScaleInfo();
-    renderEstimate();
     fitToScreen();
+    renderEstimate();
+    updateMeta();
   };
   state.image.el.src = url;
 });
 
-el.materialSelect.addEventListener('change', (e) => {
-  state.activeMaterialId = e.target.value;
-  updateStatusBar();
+el.setScaleBtn.addEventListener('click', () => {
+  setMode('scale');
+  alert('Режим масштаба: поставьте 2 точки на плане.');
 });
-el.addMaterial.addEventListener('click', () => {
-  const name = el.mName.value.trim();
-  if (!name) {
-    alert('Нельзя добавить покрытие без названия.');
-    return;
-  }
-  const id = `m${Date.now()}`;
-  state.materials.push({
-    id,
-    number: el.mNumber.value.trim() || String(state.materials.length + 1),
-    name,
-    color: el.mColor.value,
-    price: Math.max(0, Number(el.mPrice.value) || 0),
+el.materialSelect.addEventListener('change', (e) => { state.activeMaterialId = e.target.value; });
+el.exportBtn.addEventListener('click', () => {
+  const rows = [['Участок', 'Покрытие', 'Площадь м2', 'Цена', 'Стоимость']];
+  state.segments.forEach((s) => {
+    const m = getMaterial(s.materialId);
+    rows.push([s.label, m?.name || '', s.area.toFixed(2), s.price.toFixed(2), s.total.toFixed(2)]);
   });
-  state.activeMaterialId = id;
-  renderMaterials();
-  recalcAll();
-  renderEstimate();
+  const csv = rows.map((r) => r.join(';')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'estimate.csv';
+  a.click();
 });
 
-el.toolDrawPoints.addEventListener('click', () => setMode('draw_points'));
-el.toolFreehand.addEventListener('click', () => setMode('freehand'));
-el.toolScale.addEventListener('click', () => setMode('scale'));
-el.toolSelect.addEventListener('click', () => setMode('select'));
+el.toolPolygon.addEventListener('click', () => setMode('polygon'));
+el.toolPoints.addEventListener('click', () => setMode('points'));
 el.toolPan.addEventListener('click', () => setMode('pan'));
-
-el.undoPoint.addEventListener('click', () => {
-  state.currentContour.pop();
-  render();
-});
-el.clearContour.addEventListener('click', () => {
-  state.currentContour = [];
-  render();
-});
-el.closeContour.addEventListener('click', () => {
-  if (state.currentContour.length < 3) {
-    alert('Нельзя замкнуть контур меньше чем с 3 точками.');
-    return;
-  }
-  createSegmentFromContour(state.currentContour);
-});
-el.deleteSelected.addEventListener('click', () => {
+el.toolDelete.addEventListener('click', () => {
   if (state.selectedSegmentId == null) return;
   state.segments = state.segments.filter((s) => s.id !== state.selectedSegmentId);
   state.selectedSegmentId = null;
@@ -466,17 +381,7 @@ el.deleteSelected.addEventListener('click', () => {
   render();
 });
 
-el.zoomIn.addEventListener('click', () => zoomBy(1.2));
-el.zoomOut.addEventListener('click', () => zoomBy(0.83));
-el.zoom100.addEventListener('click', () => {
-  state.viewport.zoom = 1;
-  render();
-});
-el.fitView.addEventListener('click', fitToScreen);
-el.resetView.addEventListener('click', fitToScreen);
-
 el.canvas.addEventListener('mousedown', (e) => {
-  // ПКМ всегда pan и не рисует
   if (e.button === 2) {
     e.preventDefault();
     state.panning = true;
@@ -484,40 +389,35 @@ el.canvas.addEventListener('mousedown', (e) => {
     el.canvas.classList.add('panning');
     return;
   }
-
-  // Только ЛКМ для рисования/выбора
   if (e.button !== 0) return;
 
-  const panNow = state.mode === 'pan' || state.isSpacePan;
-  if (panNow) {
+  if (state.mode === 'pan') {
     state.panning = true;
     state.panStart = { x: e.clientX, y: e.clientY, ox: state.viewport.offsetX, oy: state.viewport.offsetY };
     el.canvas.classList.add('panning');
     return;
   }
 
-  if (state.mode === 'select') {
+  if (state.mode === 'points' || state.mode === 'scale') {
+    addPointOrScale(e.clientX, e.clientY);
+    return;
+  }
+
+  if (state.mode === 'polygon') {
     const hit = pickSegment(e.clientX, e.clientY);
     if (hit) {
       state.selectedSegmentId = hit;
       renderEstimate();
       render();
+      return;
     }
-    return;
-  }
-
-  if (state.mode === 'freehand') {
     startFreehand(e.clientX, e.clientY);
-    return;
   }
-
-  addPointOrScale(e.clientX, e.clientY);
 });
 
 window.addEventListener('mousemove', (e) => {
-  const c = clientToCanvas(e.clientX, e.clientY);
-  const i = canvasToImage(c);
-  el.cursorInfo.textContent = `X: ${fmtN(i.x, 1)} Y: ${fmtN(i.y, 1)}`;
+  const img = canvasToImage(clientToCanvas(e.clientX, e.clientY));
+  updateMeta(img);
 
   if (state.panning && state.panStart) {
     state.viewport.offsetX = state.panStart.ox + (e.clientX - state.panStart.x);
@@ -526,50 +426,30 @@ window.addEventListener('mousemove', (e) => {
     return;
   }
 
-  if (state.freehandDrawing) {
-    moveFreehand(e.clientX, e.clientY);
-  }
+  if (state.freehandDrawing) moveFreehand(e.clientX, e.clientY);
 });
+
 window.addEventListener('mouseup', () => {
-  if (state.freehandDrawing) {
-    endFreehand();
-  }
+  if (state.freehandDrawing) endFreehand();
   state.panning = false;
   state.panStart = null;
   el.canvas.classList.remove('panning');
 });
-el.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
+el.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 el.canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   zoomBy(e.deltaY < 0 ? 1.1 : 0.9, clientToCanvas(e.clientX, e.clientY));
+  updateMeta();
 }, { passive: false });
 
 document.addEventListener('keydown', (e) => {
-  if (e.code === 'Space') {
-    state.isSpacePan = true;
-    setMode(state.mode);
-    e.preventDefault();
-  }
   if (e.key === 'Delete' || e.key === 'Backspace') {
     state.currentContour.pop();
     render();
   }
-  if (e.key === 'Enter') {
-    if (state.currentContour.length >= 3) createSegmentFromContour(state.currentContour);
-  }
-  if (e.key === 'Escape') {
-    state.currentContour = [];
-    state.freehandDrawing = false;
-    render();
-  }
-  if (e.key === '+' || e.key === '=') zoomBy(1.12);
-  if (e.key === '-') zoomBy(0.89);
-});
-document.addEventListener('keyup', (e) => {
-  if (e.code === 'Space') {
-    state.isSpacePan = false;
-    setMode(state.mode);
+  if (e.key === 'Enter' && state.mode === 'points' && state.currentContour.length >= 3) {
+    createSegmentFromContour(state.currentContour);
   }
 });
 
@@ -579,21 +459,9 @@ el.estimateBody.addEventListener('click', (e) => {
   const id = Number(row.dataset.id);
   state.selectedSegmentId = id;
 
-  const action = e.target.dataset.action;
-  const s = state.segments.find((x) => x.id === id);
-  if (!s) return;
-
-  if (action === 'remove') state.segments = state.segments.filter((x) => x.id !== id);
-  if (action === 'duplicate') {
-    const copy = JSON.parse(JSON.stringify(s));
-    copy.id = state.nextId;
-    copy.label = `${s.label} (копия)`;
-    state.nextId += 1;
-    state.segments.push(copy);
-  }
-  if (action === 'reset') {
-    s.overrides = { areaManual: false, perimeterManual: false, priceManual: false };
-    recalcSegment(s);
+  if (e.target.dataset.action === 'remove') {
+    state.segments = state.segments.filter((s) => s.id !== id);
+    state.selectedSegmentId = null;
   }
 
   renderEstimate();
@@ -605,24 +473,16 @@ el.estimateBody.addEventListener('input', (e) => {
   if (!row) return;
   const s = state.segments.find((x) => x.id === Number(row.dataset.id));
   if (!s) return;
-  const field = e.target.dataset.field;
 
+  const field = e.target.dataset.field;
   if (field === 'label') s.label = e.target.value;
   if (field === 'materialId') {
     s.materialId = e.target.value;
-    s.overrides.priceManual = false;
-  }
-  if (field === 'area') {
-    s.area = Math.max(0, Number(e.target.value) || 0);
-    s.overrides.areaManual = true;
-  }
-  if (field === 'perimeter') {
-    s.perimeter = Math.max(0, Number(e.target.value) || 0);
-    s.overrides.perimeterManual = true;
+    s.priceManual = false;
   }
   if (field === 'price') {
     s.price = Math.max(0, Number(e.target.value) || 0);
-    s.overrides.priceManual = true;
+    s.priceManual = true;
   }
 
   recalcSegment(s);
@@ -632,8 +492,8 @@ el.estimateBody.addEventListener('input', (e) => {
 
 window.addEventListener('resize', syncCanvasSize);
 
-setMode('draw_points');
-renderMaterials();
+setMode('polygon');
+renderMaterialsSelect();
 renderEstimate();
-updateScaleInfo();
 syncCanvasSize();
+updateMeta();
