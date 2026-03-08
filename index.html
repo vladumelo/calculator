@@ -55,6 +55,26 @@
             <button id="fitView">Вписать</button>
             <button id="resetView">Сбросить вид</button>
           </div>
+
+          <details class="tool-group" open>
+            <summary><h4>Выбранный участок</h4></summary>
+            <div id="selectedInfo" class="hint">Не выбран.</div>
+          </details>
+
+          <details class="tool-group">
+            <summary><h4>Настройки покрытий</h4></summary>
+            <table>
+              <thead><tr><th>№</th><th>Название</th><th>Цвет</th><th>₽/м²</th></tr></thead>
+              <tbody id="materialsTable"></tbody>
+            </table>
+            <div class="add-material">
+              <input id="mNumber" placeholder="№" />
+              <input id="mName" placeholder="Название" />
+              <input id="mColor" type="color" value="#3b82f6" />
+              <input id="mPrice" type="number" min="0" step="1" value="1000" />
+              <button id="addMaterial">Добавить покрытие</button>
+            </div>
+          </details>
         </aside>
 
         <section class="card canvas-card">
@@ -65,37 +85,21 @@
             <span id="cursorInfo">X: — Y: —</span>
           </div>
         </section>
-
-        <aside class="card side">
-          <h3>Покрытия</h3>
-          <table>
-            <thead><tr><th>№</th><th>Название</th><th>Цвет</th><th>₽/м²</th></tr></thead>
-            <tbody id="materialsTable"></tbody>
-          </table>
-          <div class="add-material">
-            <input id="mNumber" placeholder="№" />
-            <input id="mName" placeholder="Название" />
-            <input id="mColor" type="color" value="#3b82f6" />
-            <input id="mPrice" type="number" min="0" step="1" value="1000" />
-            <button id="addMaterial">Добавить покрытие</button>
-          </div>
-
-          <h3>Выбранный участок</h3>
-          <div id="selectedInfo" class="hint">Не выбран.</div>
-        </aside>
       </section>
 
-      <section class="card">
+      <section class="card estimate-panel">
         <h2>Смета по участкам</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Участок</th><th>Покрытие</th><th>№ покрытия</th><th>Площадь, м²</th><th>Периметр, м</th><th>₽/м²</th><th>Стоимость, ₽</th><th>Действия</th>
-            </tr>
-          </thead>
-          <tbody id="estimateBody"></tbody>
-          <tfoot><tr><td colspan="6">Итого</td><td id="estimateTotal">0 ₽</td><td></td></tr></tfoot>
-        </table>
+        <div class="estimate-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Участок</th><th>Покрытие</th><th>№ покрытия</th><th>Площадь, м²</th><th>Периметр, м</th><th>₽/м²</th><th>Стоимость, ₽</th><th>Действия</th>
+              </tr>
+            </thead>
+            <tbody id="estimateBody"></tbody>
+            <tfoot><tr><td colspan="6">Итого</td><td id="estimateTotal">0 ₽</td><td></td></tr></tfoot>
+          </table>
+        </div>
       </section>
     </main>
 
