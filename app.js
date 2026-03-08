@@ -17,6 +17,7 @@ const state = {
   segments: [],
   nextId: 1,
   panStart: null,
+  panButton: null,
 };
 
 const el = {
@@ -414,9 +415,35 @@ el.fitView.addEventListener('click', fitToScreen);
 el.resetView.addEventListener('click', fitToScreen);
 
 el.canvas.addEventListener('mousedown', (e) => {
-  const panNow = state.mode === 'pan' || state.isSpacePan || e.button === 1;
+  // Правая кнопка всегда = временный pan (независимо от режима)
+  if (e.button === 2) {
+    e.preventDefault();
+    state.panning = true;
+    state.panButton = 2;
+    state.panStart = { x: e.clientX, y: e.clientY, ox: state.viewport.offsetX, oy: state.viewport.offsetY };
+    el.canvas.classList.add('panning');
+    return;
+  }
+
+  // Средняя кнопка тоже может панорамировать
+  if (e.button === 1) {
+    e.preventDefault();
+    state.panning = true;
+    state.panButton = 1;
+    state.panStart = { x: e.clientX, y: e.clientY, ox: state.viewport.offsetX, oy: state.viewport.offsetY };
+    el.canvas.classList.add('panning');
+    return;
+  }
+
+  // Логика рисования/выбора — только левая кнопка
+  if (e.button !== 0) {
+    return;
+  }
+
+  const panNow = state.mode === 'pan' || state.isSpacePan;
   if (panNow) {
     state.panning = true;
+    state.panButton = 0;
     state.panStart = { x: e.clientX, y: e.clientY, ox: state.viewport.offsetX, oy: state.viewport.offsetY };
     el.canvas.classList.add('panning');
     return;
@@ -453,7 +480,13 @@ window.addEventListener('mousemove', (e) => {
 window.addEventListener('mouseup', () => {
   state.panning = false;
   state.panStart = null;
+  state.panButton = null;
   el.canvas.classList.remove('panning');
+});
+
+// Отключаем системное меню ПКМ внутри рабочей области редактора
+el.canvas.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
 });
 
 el.canvas.addEventListener('wheel', (e) => {
