@@ -1,13 +1,12 @@
-// ===== State =====
 const state = {
-  mode: 'draw', // draw | scale | pan
+  mode: 'draw', // draw | scale | pan | select
   isSpacePan: false,
   panning: false,
   selectedSegmentId: null,
   image: { el: new Image(), loaded: false, width: 0, height: 0 },
   viewport: { zoom: 1, minZoom: 0.2, maxZoom: 12, offsetX: 0, offsetY: 0 },
   scale: { metersPerPixel: null, points: [] },
-  currentContour: [], // image coordinates
+  currentContour: [],
   materials: [
     { id: 'm1', number: '1', name: 'Асфальт', color: '#6b7280', price: 1650 },
     { id: 'm2', number: '2', name: 'Бетон', color: '#94a3b8', price: 2200 },
@@ -21,18 +20,27 @@ const state = {
 };
 
 const el = {
-  canvas: document.getElementById('canvas'),
-  canvasPanel: document.getElementById('canvasPanel'),
   imageInput: document.getElementById('imageInput'),
+  openEditorBtn: document.getElementById('openEditorBtn'),
+  closeEditorBtn: document.getElementById('closeEditorBtn'),
+  editorOverlay: document.getElementById('editorOverlay'),
+  editorTools: document.getElementById('editorTools'),
+  toggleToolsBtn: document.getElementById('toggleToolsBtn'),
+
+  canvas: document.getElementById('canvas'),
   materialSelect: document.getElementById('materialSelect'),
   materialsTable: document.getElementById('materialsTable'),
   estimateBody: document.getElementById('estimateBody'),
   estimateTotal: document.getElementById('estimateTotal'),
   scaleInfo: document.getElementById('scaleInfo'),
+  zoomInfo: document.getElementById('zoomInfo'),
+  cursorInfo: document.getElementById('cursorInfo'),
+
   realDistanceInput: document.getElementById('realDistanceInput'),
   toolDraw: document.getElementById('toolDraw'),
   toolScale: document.getElementById('toolScale'),
   toolPan: document.getElementById('toolPan'),
+  toolSelect: document.getElementById('toolSelect'),
   undoPoint: document.getElementById('undoPoint'),
   clearContour: document.getElementById('clearContour'),
   closeContour: document.getElementById('closeContour'),
@@ -42,20 +50,20 @@ const el = {
   zoom100: document.getElementById('zoom100'),
   fitView: document.getElementById('fitView'),
   resetView: document.getElementById('resetView'),
-  fullscreen: document.getElementById('fullscreen'),
-  editorRoot: document.getElementById('editorRoot'),
+
   addMaterial: document.getElementById('addMaterial'),
   mNumber: document.getElementById('mNumber'),
   mName: document.getElementById('mName'),
   mColor: document.getElementById('mColor'),
   mPrice: document.getElementById('mPrice'),
 };
-const ctx = el.canvas.getContext('2d');
 
-// ===== Utils =====
+const ctx = el.canvas.getContext('2d');
 const fmtN = (v, d = 2) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(v);
 const fmtM = (v) => `${fmtN(v, 2)} ₽`;
+const getMaterial = (id) => state.materials.find((m) => m.id === id);
 const dist = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
+
 function areaShoelace(points) {
   let s = 0;
   for (let i = 0; i < points.length; i += 1) {
@@ -81,16 +89,12 @@ function pointInPolygon(point, poly) {
   }
   return inside;
 }
-const getMaterial = (id) => state.materials.find((m) => m.id === id);
 
-// ===== Viewport / coordinates =====
 function syncCanvasSize() {
-  const rect = el.canvasPanel.getBoundingClientRect();
+  const rect = el.canvas.getBoundingClientRect();
   const dpr = window.devicePixelRatio || 1;
   el.canvas.width = Math.max(1, Math.round(rect.width * dpr));
   el.canvas.height = Math.max(1, Math.round(rect.height * dpr));
-  el.canvas.style.width = `${Math.round(rect.width)}px`;
-  el.canvas.style.height = `${Math.round(rect.height)}px`;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   render();
 }
@@ -106,6 +110,7 @@ function imageToCanvas(p) {
   const { zoom, offsetX, offsetY } = state.viewport;
   return { x: p.x * zoom + offsetX, y: p.y * zoom + offsetY };
 }
+
 function fitToScreen() {
   if (!state.image.loaded) return;
   const rect = el.canvas.getBoundingClientRect();
@@ -116,93 +121,86 @@ function fitToScreen() {
   render();
 }
 function zoomBy(factor, anchorCanvas = null) {
-  const oldZ = state.viewport.zoom;
-  let newZ = oldZ * factor;
-  newZ = Math.max(state.viewport.minZoom, Math.min(state.viewport.maxZoom, newZ));
-  if (Math.abs(newZ - oldZ) < 1e-8) return;
-
+  const old = state.viewport.zoom;
+  const next = Math.max(state.viewport.minZoom, Math.min(state.viewport.maxZoom, old * factor));
+  if (Math.abs(next - old) < 1e-8) return;
   const anchor = anchorCanvas || { x: el.canvas.clientWidth / 2, y: el.canvas.clientHeight / 2 };
-  const imgBefore = canvasToImage(anchor);
-  state.viewport.zoom = newZ;
-  state.viewport.offsetX = anchor.x - imgBefore.x * newZ;
-  state.viewport.offsetY = anchor.y - imgBefore.y * newZ;
+  const img = canvasToImage(anchor);
+  state.viewport.zoom = next;
+  state.viewport.offsetX = anchor.x - img.x * next;
+  state.viewport.offsetY = anchor.y - img.y * next;
   render();
 }
-function resetView() {
-  fitToScreen();
-}
 
-// ===== Geometry / estimate =====
-function recalcSegment(segment) {
-  const m = getMaterial(segment.materialId);
-  const baseAreaPx = areaShoelace(segment.points);
-  const basePerPx = perim(segment.points);
+function recalcSegment(s) {
+  const m = getMaterial(s.materialId);
   const k = state.scale.metersPerPixel || 0;
-  segment.baseArea = baseAreaPx * (k ** 2);
-  segment.basePerimeter = basePerPx * k;
-  segment.basePrice = m ? m.price : 0;
-
-  if (!segment.overrides.areaManual) segment.area = segment.baseArea;
-  if (!segment.overrides.perimeterManual) segment.perimeter = segment.basePerimeter;
-  if (!segment.overrides.priceManual) segment.price = segment.basePrice;
-  segment.total = segment.area * segment.price;
+  s.baseArea = areaShoelace(s.points) * (k ** 2);
+  s.basePerimeter = perim(s.points) * k;
+  s.basePrice = m ? m.price : 0;
+  if (!s.overrides.areaManual) s.area = s.baseArea;
+  if (!s.overrides.perimeterManual) s.perimeter = s.basePerimeter;
+  if (!s.overrides.priceManual) s.price = s.basePrice;
+  s.total = s.area * s.price;
 }
-function recalcAllSegments() {
-  state.segments.forEach(recalcSegment);
-}
+function recalcAll() { state.segments.forEach(recalcSegment); }
 
-// ===== Rendering =====
-function drawPolygon(points, color, close = true, fill = false, width = 2) {
+function drawPolygon(points, color, close = true, fill = false, w = 2) {
   if (!points.length) return;
-  const s0 = imageToCanvas(points[0]);
-  ctx.beginPath();
-  ctx.moveTo(s0.x, s0.y);
-  points.slice(1).forEach((p) => {
-    const s = imageToCanvas(p); ctx.lineTo(s.x, s.y);
-  });
+  const p0 = imageToCanvas(points[0]);
+  ctx.beginPath(); ctx.moveTo(p0.x, p0.y);
+  points.slice(1).forEach((p) => { const s = imageToCanvas(p); ctx.lineTo(s.x, s.y); });
   if (close) ctx.closePath();
   if (fill) { ctx.fillStyle = color; ctx.fill(); }
-  ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke();
+  ctx.strokeStyle = color; ctx.lineWidth = w; ctx.stroke();
 }
 function drawPoint(p, color, r = 4) {
   const s = imageToCanvas(p);
   ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
 }
+
 function render() {
   const rect = el.canvas.getBoundingClientRect();
   ctx.clearRect(0, 0, rect.width, rect.height);
 
   if (state.image.loaded) {
-    const x = state.viewport.offsetX;
-    const y = state.viewport.offsetY;
-    const w = state.image.width * state.viewport.zoom;
-    const h = state.image.height * state.viewport.zoom;
-    ctx.drawImage(state.image.el, x, y, w, h);
+    ctx.drawImage(
+      state.image.el,
+      state.viewport.offsetX,
+      state.viewport.offsetY,
+      state.image.width * state.viewport.zoom,
+      state.image.height * state.viewport.zoom,
+    );
   }
 
   state.segments.forEach((s) => {
     const m = getMaterial(s.materialId);
-    const selected = s.id === state.selectedSegmentId;
     drawPolygon(s.points, `${m?.color || '#64748b'}55`, true, true, 2);
-    drawPolygon(s.points, selected ? '#16a34a' : (m?.color || '#64748b'), true, false, selected ? 3 : 2);
+    drawPolygon(s.points, s.id === state.selectedSegmentId ? '#22c55e' : (m?.color || '#64748b'), true, false, s.id === state.selectedSegmentId ? 3 : 2);
   });
 
   if (state.mode === 'scale') {
-    if (state.scale.points.length) drawPolygon(state.scale.points, '#dc2626', false, false, 2);
-    state.scale.points.forEach((p) => drawPoint(p, '#dc2626', 5));
+    drawPolygon(state.scale.points, '#ef4444', false, false, 2);
+    state.scale.points.forEach((p) => drawPoint(p, '#ef4444', 5));
   }
 
   if (state.currentContour.length) {
-    drawPolygon(state.currentContour, '#2563eb', false, false, 2);
-    state.currentContour.forEach((p) => drawPoint(p, '#2563eb', 4));
+    drawPolygon(state.currentContour, '#3b82f6', false, false, 2);
+    state.currentContour.forEach((p) => drawPoint(p, '#3b82f6', 4));
   }
+
+  el.zoomInfo.textContent = `Zoom: ${Math.round(state.viewport.zoom * 100)}%`;
 }
+
 function renderMaterials() {
   el.materialSelect.innerHTML = '';
   el.materialsTable.innerHTML = '';
+
   state.materials.forEach((m) => {
     const opt = document.createElement('option');
-    opt.value = m.id; opt.textContent = `${m.number} — ${m.name}`; opt.selected = m.id === state.activeMaterialId;
+    opt.value = m.id;
+    opt.textContent = `${m.number} — ${m.name}`;
+    opt.selected = m.id === state.activeMaterialId;
     el.materialSelect.appendChild(opt);
 
     const tr = document.createElement('tr');
@@ -210,11 +208,11 @@ function renderMaterials() {
     el.materialsTable.appendChild(tr);
   });
 }
+
 function materialSelectHTML(selectedId) {
-  return `<select data-field="materialId">${state.materials
-    .map((m) => `<option value="${m.id}" ${m.id === selectedId ? 'selected' : ''}>${m.name}</option>`)
-    .join('')}</select>`;
+  return `<select data-field="materialId">${state.materials.map((m) => `<option value="${m.id}" ${m.id === selectedId ? 'selected' : ''}>${m.name}</option>`).join('')}</select>`;
 }
+
 function renderEstimate() {
   el.estimateBody.innerHTML = '';
   let sum = 0;
@@ -223,8 +221,8 @@ function renderEstimate() {
     const m = getMaterial(s.materialId);
     sum += s.total;
     const tr = document.createElement('tr');
-    if (s.id === state.selectedSegmentId) tr.classList.add('selected-row');
     tr.dataset.id = String(s.id);
+    if (s.id === state.selectedSegmentId) tr.classList.add('selected-row');
 
     tr.innerHTML = `
       <td><input data-field="label" value="${s.label}" /></td>
@@ -235,60 +233,73 @@ function renderEstimate() {
       <td><input data-field="price" type="number" step="1" value="${s.price.toFixed(2)}" class="${s.overrides.priceManual ? 'manual' : ''}" /></td>
       <td>${fmtM(s.total)}</td>
       <td class="inline-actions">
-        <button type="button" data-action="duplicate">Дублировать</button>
-        <button type="button" data-action="reset">Сброс</button>
-        <button type="button" data-action="remove">Удалить</button>
-      </td>
-    `;
+        <button data-action="duplicate" type="button">Дублировать</button>
+        <button data-action="reset" type="button">Сброс</button>
+        <button data-action="remove" type="button">Удалить</button>
+      </td>`;
 
     el.estimateBody.appendChild(tr);
   });
 
   el.estimateTotal.textContent = fmtM(sum);
 }
+
 function updateScaleInfo() {
   if (!state.scale.metersPerPixel) {
     el.scaleInfo.textContent = 'Масштаб не задан';
     return;
   }
-  const mpp = state.scale.metersPerPixel;
-  el.scaleInfo.textContent = `1 px = ${fmtN(mpp, 5)} м | 1 px² = ${fmtN(mpp ** 2, 7)} м²`;
+  el.scaleInfo.textContent = `1 px = ${fmtN(state.scale.metersPerPixel, 5)} м | 1 px² = ${fmtN(state.scale.metersPerPixel ** 2, 7)} м²`;
 }
+
 function setMode(mode) {
   state.mode = mode;
   el.toolDraw.classList.toggle('active-tool', mode === 'draw');
   el.toolScale.classList.toggle('active-tool', mode === 'scale');
   el.toolPan.classList.toggle('active-tool', mode === 'pan' || state.isSpacePan);
+  el.toolSelect.classList.toggle('active-tool', mode === 'select');
   el.canvas.classList.toggle('pan', mode === 'pan' || state.isSpacePan);
 }
 
-// ===== Actions =====
-function addPointFromClick(clientX, clientY) {
+function pickSegment(clientX, clientY) {
+  const p = canvasToImage(clientToCanvas(clientX, clientY));
+  for (let i = state.segments.length - 1; i >= 0; i -= 1) {
+    if (pointInPolygon(p, state.segments[i].points)) return state.segments[i].id;
+  }
+  return null;
+}
+
+function addPoint(clientX, clientY) {
   if (!state.image.loaded) return;
-  const imgPoint = canvasToImage(clientToCanvas(clientX, clientY));
+  const p = canvasToImage(clientToCanvas(clientX, clientY));
 
   if (state.mode === 'scale') {
-    if (state.scale.points.length === 2) { state.scale.points = []; state.scale.metersPerPixel = null; }
-    state.scale.points.push(imgPoint);
+    if (state.scale.points.length === 2) {
+      state.scale.points = [];
+      state.scale.metersPerPixel = null;
+    }
+    state.scale.points.push(p);
     if (state.scale.points.length === 2) {
       const px = dist(state.scale.points[0], state.scale.points[1]);
-      const meters = Number(el.realDistanceInput.value);
-      if (meters <= 0 || !px) return;
-      state.scale.metersPerPixel = meters / px;
-      recalcAllSegments();
-      updateScaleInfo();
-      renderEstimate();
-      setMode('draw');
+      const m = Number(el.realDistanceInput.value);
+      if (px && m > 0) {
+        state.scale.metersPerPixel = m / px;
+        recalcAll();
+        updateScaleInfo();
+        renderEstimate();
+        setMode('draw');
+      }
     }
     render();
     return;
   }
 
   if (state.mode === 'draw') {
-    state.currentContour.push(imgPoint);
+    state.currentContour.push(p);
     render();
   }
 }
+
 function closeContour() {
   if (state.currentContour.length < 3) {
     alert('Нельзя замкнуть контур меньше чем с 3 точками.');
@@ -299,11 +310,10 @@ function closeContour() {
     return;
   }
 
-  const m = getMaterial(state.activeMaterialId);
-  const segment = {
+  const s = {
     id: state.nextId,
     label: `Участок ${state.nextId}`,
-    materialId: m.id,
+    materialId: state.activeMaterialId,
     points: state.currentContour.map((p) => ({ ...p })),
     overrides: { areaManual: false, perimeterManual: false, priceManual: false },
     baseArea: 0,
@@ -314,30 +324,36 @@ function closeContour() {
     price: 0,
     total: 0,
   };
-  recalcSegment(segment);
-  state.segments.push(segment);
-  state.selectedSegmentId = segment.id;
+  recalcSegment(s);
+  state.segments.push(s);
+  state.selectedSegmentId = s.id;
   state.nextId += 1;
   state.currentContour = [];
   renderEstimate();
   render();
 }
-function deleteSelected() {
-  if (state.selectedSegmentId == null) return;
-  state.segments = state.segments.filter((s) => s.id !== state.selectedSegmentId);
-  state.selectedSegmentId = null;
-  renderEstimate();
-  render();
+
+function openEditor() {
+  el.editorOverlay.classList.remove('hidden');
+  el.editorOverlay.setAttribute('aria-hidden', 'false');
+  setTimeout(() => {
+    syncCanvasSize();
+    if (state.image.loaded) fitToScreen();
+  }, 0);
 }
-function pickSegmentAt(clientX, clientY) {
-  const p = canvasToImage(clientToCanvas(clientX, clientY));
-  for (let i = state.segments.length - 1; i >= 0; i -= 1) {
-    if (pointInPolygon(p, state.segments[i].points)) return state.segments[i].id;
-  }
-  return null;
+function closeEditor() {
+  el.editorOverlay.classList.add('hidden');
+  el.editorOverlay.setAttribute('aria-hidden', 'true');
 }
 
-// ===== Events =====
+el.openEditorBtn.addEventListener('click', openEditor);
+el.closeEditorBtn.addEventListener('click', closeEditor);
+el.toggleToolsBtn.addEventListener('click', () => {
+  el.editorTools.classList.toggle('collapsed');
+  el.toggleToolsBtn.textContent = el.editorTools.classList.contains('collapsed') ? 'Показать панель' : 'Свернуть панель';
+  setTimeout(syncCanvasSize, 10);
+});
+
 el.imageInput.addEventListener('change', (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
@@ -351,14 +367,13 @@ el.imageInput.addEventListener('change', (e) => {
     state.selectedSegmentId = null;
     state.nextId = 1;
     state.scale = { metersPerPixel: null, points: [] };
-    fitToScreen();
     updateScaleInfo();
     renderEstimate();
+    openEditor();
   };
   state.image.el.src = url;
 });
 
-el.materialSelect.addEventListener('change', (e) => { state.activeMaterialId = e.target.value; });
 el.addMaterial.addEventListener('click', () => {
   const name = el.mName.value.trim();
   if (!name) { alert('Нельзя добавить материал без названия.'); return; }
@@ -372,9 +387,31 @@ el.addMaterial.addEventListener('click', () => {
   });
   state.activeMaterialId = id;
   renderMaterials();
-  recalcAllSegments();
+  recalcAll();
   renderEstimate();
 });
+
+el.materialSelect.addEventListener('change', (e) => { state.activeMaterialId = e.target.value; });
+
+el.toolDraw.addEventListener('click', () => setMode('draw'));
+el.toolScale.addEventListener('click', () => setMode('scale'));
+el.toolPan.addEventListener('click', () => setMode('pan'));
+el.toolSelect.addEventListener('click', () => setMode('select'));
+el.undoPoint.addEventListener('click', () => { state.currentContour.pop(); render(); });
+el.clearContour.addEventListener('click', () => { state.currentContour = []; render(); });
+el.closeContour.addEventListener('click', closeContour);
+el.deleteSelected.addEventListener('click', () => {
+  if (state.selectedSegmentId == null) return;
+  state.segments = state.segments.filter((s) => s.id !== state.selectedSegmentId);
+  state.selectedSegmentId = null;
+  renderEstimate();
+  render();
+});
+el.zoomIn.addEventListener('click', () => zoomBy(1.2));
+el.zoomOut.addEventListener('click', () => zoomBy(0.83));
+el.zoom100.addEventListener('click', () => { state.viewport.zoom = 1; render(); });
+el.fitView.addEventListener('click', fitToScreen);
+el.resetView.addEventListener('click', fitToScreen);
 
 el.canvas.addEventListener('mousedown', (e) => {
   const panNow = state.mode === 'pan' || state.isSpacePan || e.button === 1;
@@ -385,16 +422,29 @@ el.canvas.addEventListener('mousedown', (e) => {
     return;
   }
 
-  const hit = pickSegmentAt(e.clientX, e.clientY);
-  if (hit) {
+  const hit = pickSegment(e.clientX, e.clientY);
+  if (state.mode === 'select' && hit) {
     state.selectedSegmentId = hit;
     renderEstimate();
     render();
     return;
   }
-  addPointFromClick(e.clientX, e.clientY);
+
+  if (hit && state.mode !== 'draw') {
+    state.selectedSegmentId = hit;
+    renderEstimate();
+    render();
+    return;
+  }
+
+  addPoint(e.clientX, e.clientY);
 });
+
 window.addEventListener('mousemove', (e) => {
+  const c = clientToCanvas(e.clientX, e.clientY);
+  const i = canvasToImage(c);
+  el.cursorInfo.textContent = `X: ${fmtN(i.x, 1)} Y: ${fmtN(i.y, 1)}`;
+
   if (!state.panning || !state.panStart) return;
   state.viewport.offsetX = state.panStart.ox + (e.clientX - state.panStart.x);
   state.viewport.offsetY = state.panStart.oy + (e.clientY - state.panStart.y);
@@ -405,38 +455,23 @@ window.addEventListener('mouseup', () => {
   state.panStart = null;
   el.canvas.classList.remove('panning');
 });
+
 el.canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  const anchor = clientToCanvas(e.clientX, e.clientY);
-  zoomBy(e.deltaY < 0 ? 1.1 : 0.9, anchor);
+  zoomBy(e.deltaY < 0 ? 1.1 : 0.9, clientToCanvas(e.clientX, e.clientY));
 }, { passive: false });
-
-el.toolDraw.addEventListener('click', () => setMode('draw'));
-el.toolScale.addEventListener('click', () => setMode('scale'));
-el.toolPan.addEventListener('click', () => setMode('pan'));
-el.undoPoint.addEventListener('click', () => { state.currentContour.pop(); render(); });
-el.clearContour.addEventListener('click', () => { state.currentContour = []; render(); });
-el.closeContour.addEventListener('click', closeContour);
-el.deleteSelected.addEventListener('click', deleteSelected);
-el.zoomIn.addEventListener('click', () => zoomBy(1.2));
-el.zoomOut.addEventListener('click', () => zoomBy(0.8));
-el.zoom100.addEventListener('click', () => { state.viewport.zoom = 1; render(); });
-el.fitView.addEventListener('click', fitToScreen);
-el.resetView.addEventListener('click', resetView);
-el.fullscreen.addEventListener('click', async () => {
-  if (!document.fullscreenElement) await el.editorRoot.requestFullscreen();
-  else await document.exitFullscreen();
-  setTimeout(syncCanvasSize, 20);
-});
 
 document.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { state.isSpacePan = true; setMode(state.mode); e.preventDefault(); }
   if (e.key === 'Delete' || e.key === 'Backspace') { state.currentContour.pop(); render(); }
   if (e.key === 'Enter') closeContour();
-  if (e.key === 'Escape') { state.currentContour = []; render(); }
-  if (e.key === '+' || e.key === '=') zoomBy(1.15);
-  if (e.key === '-') zoomBy(0.87);
-  if (e.key.toLowerCase() === 'f') el.fullscreen.click();
+  if (e.key === 'Escape') { if (!el.editorOverlay.classList.contains('hidden')) closeEditor(); }
+  if (e.key === '+' || e.key === '=') zoomBy(1.12);
+  if (e.key === '-') zoomBy(0.89);
+  if (e.key.toLowerCase() === 'f') {
+    if (el.editorOverlay.classList.contains('hidden')) openEditor();
+    else closeEditor();
+  }
 });
 document.addEventListener('keyup', (e) => {
   if (e.code === 'Space') { state.isSpacePan = false; setMode(state.mode); }
@@ -449,8 +484,6 @@ el.estimateBody.addEventListener('click', (e) => {
   state.selectedSegmentId = id;
 
   const action = e.target.dataset.action;
-  if (!action) { renderEstimate(); render(); return; }
-
   const s = state.segments.find((x) => x.id === id);
   if (!s) return;
 
@@ -479,10 +512,7 @@ el.estimateBody.addEventListener('input', (e) => {
   const field = e.target.dataset.field;
 
   if (field === 'label') s.label = e.target.value;
-  if (field === 'materialId') {
-    s.materialId = e.target.value;
-    s.overrides.priceManual = false;
-  }
+  if (field === 'materialId') { s.materialId = e.target.value; s.overrides.priceManual = false; }
   if (field === 'area') { s.area = Math.max(0, Number(e.target.value) || 0); s.overrides.areaManual = true; }
   if (field === 'perimeter') { s.perimeter = Math.max(0, Number(e.target.value) || 0); s.overrides.perimeterManual = true; }
   if (field === 'price') { s.price = Math.max(0, Number(e.target.value) || 0); s.overrides.priceManual = true; }
@@ -493,9 +523,7 @@ el.estimateBody.addEventListener('input', (e) => {
 });
 
 window.addEventListener('resize', syncCanvasSize);
-document.addEventListener('fullscreenchange', () => setTimeout(syncCanvasSize, 30));
 
-// init
 setMode('draw');
 renderMaterials();
 renderEstimate();
