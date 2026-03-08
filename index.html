@@ -3,68 +3,71 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Планировщик покрытий по изображению</title>
+    <title>Калькулятор покрытий по изображению</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="container">
-      <header>
-        <h1>Планировщик покрытий по изображению</h1>
-        <p>Загрузите план, задайте масштаб по 2 точкам и обрисовывайте участки для расчёта площади, периметра и стоимости.</p>
+    <main class="app">
+      <header class="header">
+        <h1>Калькулятор покрытий по изображению</h1>
+        <p>Масштаб, обрисовка участков, zoom/pan/fullscreen и редактируемая смета.</p>
       </header>
 
-      <section class="panel controls">
-        <label>Изображение плана
-          <input id="imageInput" type="file" accept="image/*" />
-        </label>
-        <label>Реальное расстояние, м
-          <input id="realDistanceInput" type="number" min="0.01" step="0.01" value="10" />
-        </label>
-        <button id="modeScaleBtn" type="button">Режим: масштаб</button>
-        <button id="modeDrawBtn" type="button">Режим: обрисовка</button>
-        <div class="status" id="scaleStatus">Масштаб: не задан</div>
-      </section>
-
-      <section class="workspace">
-        <div class="panel stage-panel">
-          <div id="stage" class="stage">
-            <img id="planImage" alt="План" />
-            <canvas id="overlay"></canvas>
-          </div>
-          <div class="controls">
-            <button id="undoPointBtn" type="button">Удалить последнюю точку</button>
-            <button id="clearContourBtn" type="button">Очистить контур</button>
-            <button id="closeContourBtn" type="button">Замкнуть контур</button>
-          </div>
-        </div>
-
-        <div class="panel side-panel">
-          <h2>Покрытия</h2>
-          <label>Текущее покрытие для контура
+      <section class="layout" id="editorRoot">
+        <aside class="toolbar panel">
+          <h3>Инструменты</h3>
+          <label>Покрытие
             <select id="materialSelect"></select>
           </label>
 
-          <table>
-            <thead>
-              <tr>
-                <th>№</th>
-                <th>Название</th>
-                <th>Цвет</th>
-                <th>Цена ₽/м²</th>
-              </tr>
-            </thead>
-            <tbody id="materialsBody"></tbody>
-          </table>
-
-          <h3>Добавить покрытие</h3>
-          <div class="new-material-grid">
-            <input id="newMaterialNumber" type="text" placeholder="№" />
-            <input id="newMaterialName" type="text" placeholder="Название" />
-            <input id="newMaterialColor" type="color" value="#3b82f6" />
-            <input id="newMaterialPrice" type="number" min="0" step="1" value="1000" placeholder="Цена" />
-            <button id="addMaterialBtn" type="button">Добавить</button>
+          <div class="tool-group">
+            <button id="toolDraw" title="Режим рисования">Рисование</button>
+            <button id="toolScale" title="Режим задания масштаба">Масштаб</button>
+            <button id="toolPan" title="Рука / панорамирование">Рука</button>
           </div>
-        </div>
+
+          <label>Реальная дистанция, м
+            <input id="realDistanceInput" type="number" min="0.01" step="0.01" value="10" />
+          </label>
+          <div id="scaleInfo" class="hint">Масштаб не задан</div>
+
+          <div class="tool-group">
+            <button id="undoPoint" title="Удалить последнюю точку (Backspace/Delete)">Отменить точку</button>
+            <button id="clearContour" title="Очистить текущий контур (Esc)">Очистить контур</button>
+            <button id="closeContour" title="Замкнуть контур (Enter)">Замкнуть контур</button>
+            <button id="deleteSelected" title="Удалить выбранный участок">Удалить участок</button>
+          </div>
+
+          <div class="tool-group">
+            <button id="zoomIn" title="Увеличить (+)">+</button>
+            <button id="zoomOut" title="Уменьшить (-)">−</button>
+            <button id="zoom100" title="100%">100%</button>
+            <button id="fitView" title="Вписать в экран">Вписать</button>
+            <button id="resetView" title="Сбросить вид">Сброс</button>
+            <button id="fullscreen" title="На весь экран (F)">Fullscreen</button>
+          </div>
+
+          <label>Загрузить изображение
+            <input id="imageInput" type="file" accept="image/*" />
+          </label>
+
+          <h3>Покрытия</h3>
+          <table>
+            <thead><tr><th>№</th><th>Название</th><th>Цвет</th><th>₽/м²</th></tr></thead>
+            <tbody id="materialsTable"></tbody>
+          </table>
+          <div class="add-material">
+            <input id="mNumber" placeholder="№" />
+            <input id="mName" placeholder="Название" />
+            <input id="mColor" type="color" value="#3b82f6" />
+            <input id="mPrice" type="number" min="0" step="1" value="1000" />
+            <button id="addMaterial">Добавить покрытие</button>
+          </div>
+        </aside>
+
+        <section class="canvas-panel panel" id="canvasPanel">
+          <canvas id="canvas"></canvas>
+        </section>
       </section>
 
       <section class="panel">
@@ -72,24 +75,11 @@
         <table>
           <thead>
             <tr>
-              <th>Участок</th>
-              <th>Покрытие №</th>
-              <th>Покрытие</th>
-              <th>Площадь, м²</th>
-              <th>Периметр, м</th>
-              <th>Цена ₽/м²</th>
-              <th>Стоимость, ₽</th>
-              <th>Действие</th>
+              <th>Участок</th><th>Покрытие</th><th>№ покрытия</th><th>Площадь, м²</th><th>Периметр, м</th><th>₽/м²</th><th>Стоимость, ₽</th><th>Действия</th>
             </tr>
           </thead>
-          <tbody id="segmentsBody"></tbody>
-          <tfoot>
-            <tr>
-              <td colspan="6">Итого</td>
-              <td id="estimateTotal">0 ₽</td>
-              <td></td>
-            </tr>
-          </tfoot>
+          <tbody id="estimateBody"></tbody>
+          <tfoot><tr><td colspan="6">Итого</td><td id="estimateTotal">0 ₽</td><td></td></tr></tfoot>
         </table>
       </section>
     </main>
