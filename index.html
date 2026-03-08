@@ -25,6 +25,72 @@
         <button id="loadDemoBtn" type="button">Загрузить демо-проект</button>
       </section>
 
+      <section class="planner-section">
+        <h2>Планировщик по изображению</h2>
+        <div class="controls planner-controls">
+          <label class="file-input">
+            Изображение плана
+            <input id="planImageFile" type="file" accept="image/*" />
+          </label>
+          <label>
+            Реальная дистанция, м
+            <input id="knownDistanceInput" type="number" min="0.01" step="0.01" value="10" />
+          </label>
+          <button id="startScaleBtn" type="button">Задать масштаб (2 точки)</button>
+          <span id="scaleInfo">Масштаб не задан</span>
+        </div>
+
+        <div class="planner-grid">
+          <div>
+            <canvas id="planCanvas" width="900" height="520"></canvas>
+            <div class="controls">
+              <button id="undoPointBtn" type="button">Удалить точку</button>
+              <button id="finishPolygonBtn" type="button">Замкнуть контур</button>
+              <button id="clearCurrentBtn" type="button">Очистить контур</button>
+            </div>
+            <small>Клик по canvas добавляет точки контура. Масштаб задается отдельно через 2 точки.</small>
+          </div>
+
+          <div>
+            <h3>Типы покрытий</h3>
+            <div class="type-create">
+              <input id="typeNameInput" type="text" placeholder="Название типа" value="Новое покрытие" />
+              <input id="typeColorInput" type="color" value="#22c55e" />
+              <input id="typePriceInput" type="number" min="0" step="1" value="1200" placeholder="Цена, ₽" />
+              <button id="addTypeBtn" type="button">Добавить тип</button>
+            </div>
+            <label>
+              Текущий тип для обрисовки
+              <select id="activeTypeSelect"></select>
+            </label>
+            <table>
+              <thead>
+                <tr>
+                  <th>Цвет</th>
+                  <th>Название</th>
+                  <th>Цена за м², ₽</th>
+                </tr>
+              </thead>
+              <tbody id="typeTableBody"></tbody>
+            </table>
+
+            <h3>Обрисованные участки</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Тип</th>
+                  <th>Площадь, м²</th>
+                  <th>Периметр, м</th>
+                  <th>В смету</th>
+                </tr>
+              </thead>
+              <tbody id="polygonTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <section>
         <h2>Сводная смета покрытий</h2>
         <table>
