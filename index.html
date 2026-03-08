@@ -3,146 +3,96 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Калькулятор покрытий</title>
+    <title>Планировщик покрытий по изображению</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <main class="container">
       <header>
-        <h1>Онлайн‑калькулятор покрытий</h1>
-        <p>
-          Загрузите проект или используйте демо-набор. Для каждого покрытия можно
-          менять стоимость и количество (площадь, объем, штуки), а также перейти
-          к детальному расчету по слоям конструкции.
-        </p>
+        <h1>Планировщик покрытий по изображению</h1>
+        <p>Загрузите план, задайте масштаб по 2 точкам и обрисовывайте участки для расчёта площади, периметра и стоимости.</p>
       </header>
 
-      <section class="controls">
-        <label class="file-input">
-          JSON проекта
-          <input id="projectFile" type="file" accept="application/json" />
+      <section class="panel controls">
+        <label>Изображение плана
+          <input id="imageInput" type="file" accept="image/*" />
         </label>
-        <button id="loadDemoBtn" type="button">Загрузить демо-проект</button>
+        <label>Реальное расстояние, м
+          <input id="realDistanceInput" type="number" min="0.01" step="0.01" value="10" />
+        </label>
+        <button id="modeScaleBtn" type="button">Режим: масштаб</button>
+        <button id="modeDrawBtn" type="button">Режим: обрисовка</button>
+        <div class="status" id="scaleStatus">Масштаб: не задан</div>
       </section>
 
-      <section class="planner-section">
-        <h2>Планировщик по изображению</h2>
-        <div class="controls planner-controls">
-          <label class="file-input">
-            Изображение плана
-            <input id="planImageFile" type="file" accept="image/*" />
-          </label>
-          <label>
-            Реальная дистанция, м
-            <input id="knownDistanceInput" type="number" min="0.01" step="0.01" value="10" />
-          </label>
-          <button id="startScaleBtn" type="button">Задать масштаб (2 точки)</button>
-          <span id="scaleInfo">Масштаб не задан</span>
+      <section class="workspace">
+        <div class="panel stage-panel">
+          <div id="stage" class="stage">
+            <img id="planImage" alt="План" />
+            <canvas id="overlay"></canvas>
+          </div>
+          <div class="controls">
+            <button id="undoPointBtn" type="button">Удалить последнюю точку</button>
+            <button id="clearContourBtn" type="button">Очистить контур</button>
+            <button id="closeContourBtn" type="button">Замкнуть контур</button>
+          </div>
         </div>
 
-        <div class="planner-grid">
-          <div>
-            <canvas id="planCanvas" width="900" height="520"></canvas>
-            <div class="controls">
-              <button id="undoPointBtn" type="button">Удалить точку</button>
-              <button id="finishPolygonBtn" type="button">Замкнуть контур</button>
-              <button id="clearCurrentBtn" type="button">Очистить контур</button>
-            </div>
-            <small>Клик по canvas добавляет точки контура. Масштаб задается отдельно через 2 точки.</small>
-          </div>
+        <div class="panel side-panel">
+          <h2>Покрытия</h2>
+          <label>Текущее покрытие для контура
+            <select id="materialSelect"></select>
+          </label>
 
-          <div>
-            <h3>Типы покрытий</h3>
-            <div class="type-create">
-              <input id="typeNameInput" type="text" placeholder="Название типа" value="Новое покрытие" />
-              <input id="typeColorInput" type="color" value="#22c55e" />
-              <input id="typePriceInput" type="number" min="0" step="1" value="1200" placeholder="Цена, ₽" />
-              <button id="addTypeBtn" type="button">Добавить тип</button>
-            </div>
-            <label>
-              Текущий тип для обрисовки
-              <select id="activeTypeSelect"></select>
-            </label>
-            <table>
-              <thead>
-                <tr>
-                  <th>Цвет</th>
-                  <th>Название</th>
-                  <th>Цена за м², ₽</th>
-                </tr>
-              </thead>
-              <tbody id="typeTableBody"></tbody>
-            </table>
+          <table>
+            <thead>
+              <tr>
+                <th>№</th>
+                <th>Название</th>
+                <th>Цвет</th>
+                <th>Цена ₽/м²</th>
+              </tr>
+            </thead>
+            <tbody id="materialsBody"></tbody>
+          </table>
 
-            <h3>Обрисованные участки</h3>
-            <table>
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Тип</th>
-                  <th>Площадь, м²</th>
-                  <th>Периметр, м</th>
-                  <th>В смету</th>
-                </tr>
-              </thead>
-              <tbody id="polygonTableBody"></tbody>
-            </table>
+          <h3>Добавить покрытие</h3>
+          <div class="new-material-grid">
+            <input id="newMaterialNumber" type="text" placeholder="№" />
+            <input id="newMaterialName" type="text" placeholder="Название" />
+            <input id="newMaterialColor" type="color" value="#3b82f6" />
+            <input id="newMaterialPrice" type="number" min="0" step="1" value="1000" placeholder="Цена" />
+            <button id="addMaterialBtn" type="button">Добавить</button>
           </div>
         </div>
       </section>
 
-      <section>
-        <h2>Сводная смета покрытий</h2>
+      <section class="panel">
+        <h2>Смета по участкам</h2>
         <table>
           <thead>
             <tr>
-              <th>Код</th>
+              <th>Участок</th>
+              <th>Покрытие №</th>
               <th>Покрытие</th>
-              <th>Кол-во</th>
-              <th>Ед.</th>
-              <th>Цена за ед., ₽</th>
-              <th>Итого, ₽</th>
-              <th>Детально</th>
+              <th>Площадь, м²</th>
+              <th>Периметр, м</th>
+              <th>Цена ₽/м²</th>
+              <th>Стоимость, ₽</th>
+              <th>Действие</th>
             </tr>
           </thead>
-          <tbody id="coverageTableBody"></tbody>
+          <tbody id="segmentsBody"></tbody>
           <tfoot>
             <tr>
-              <td colspan="5">Общая стоимость</td>
-              <td id="grandTotal">0 ₽</td>
+              <td colspan="6">Итого</td>
+              <td id="estimateTotal">0 ₽</td>
               <td></td>
             </tr>
           </tfoot>
         </table>
       </section>
     </main>
-
-    <dialog id="detailDialog">
-      <form method="dialog" class="dialog-header">
-        <h3 id="detailTitle">Детализация</h3>
-        <button type="submit" class="close-btn">✕</button>
-      </form>
-      <div class="dialog-body">
-        <table>
-          <thead>
-            <tr>
-              <th>Слой</th>
-              <th>Кол-во</th>
-              <th>Ед.</th>
-              <th>Цена за ед., ₽</th>
-              <th>Итого, ₽</th>
-            </tr>
-          </thead>
-          <tbody id="layerTableBody"></tbody>
-          <tfoot>
-            <tr>
-              <td colspan="4">Сумма по слоям</td>
-              <td id="layerTotal">0 ₽</td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-    </dialog>
 
     <script src="app.js"></script>
   </body>

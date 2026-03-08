@@ -1,658 +1,409 @@
-const unitOptions = [
-  { value: 'm2', label: 'м²' },
-  { value: 'm3', label: 'м³' },
-  { value: 'pcs', label: 'шт' },
-];
-
-const demoProject = {
-  name: 'Благоустройство ЖК «Черри»',
-  coverages: [
-    {
-      code: '1',
-      name: 'Асфальтобетон',
-      quantity: 1637,
-      unit: 'm2',
-      unitPrice: 1650,
-      layers: [
-        { name: 'Уплотнение грунта', quantity: 1637, unit: 'm2', unitPrice: 85 },
-        { name: 'Укладка пленки', quantity: 1637, unit: 'm2', unitPrice: 65 },
-        { name: 'Отсыпка щебнем 200 мм', quantity: 327.4, unit: 'm3', unitPrice: 2100 },
-        { name: 'Асфальтобетонирование', quantity: 1637, unit: 'm2', unitPrice: 960 },
-      ],
-    },
-    {
-      code: '2',
-      name: 'Монолитный бетон (покрытие)',
-      quantity: 2659,
-      unit: 'm2',
-      unitPrice: 2200,
-      layers: [
-        { name: 'Уплотнение грунта', quantity: 2659, unit: 'm2', unitPrice: 90 },
-        { name: 'Щебеночная подготовка 200 мм', quantity: 531.8, unit: 'm3', unitPrice: 2200 },
-        { name: 'Бетонирование В25', quantity: 398.8, unit: 'm3', unitPrice: 7800 },
-      ],
-    },
-    {
-      code: '3.1',
-      name: 'Брусчатка на стилобате',
-      quantity: 694.91,
-      unit: 'm2',
-      unitPrice: 2900,
-      layers: [
-        { name: 'Разделительный слой', quantity: 694.91, unit: 'm2', unitPrice: 120 },
-        { name: 'Подстилающий слой (стяжка)', quantity: 34.75, unit: 'm3', unitPrice: 6900 },
-        { name: 'Укладка брусчатки', quantity: 694.91, unit: 'm2', unitPrice: 1750 },
-      ],
-    },
-    {
-      code: '7',
-      name: 'Грунт (газон)',
-      quantity: 1481.59,
-      unit: 'm2',
-      unitPrice: 950,
-      layers: [
-        { name: 'Планировка основания', quantity: 1481.59, unit: 'm2', unitPrice: 60 },
-        { name: 'Плодородный грунт 100 мм', quantity: 148.16, unit: 'm3', unitPrice: 1650 },
-        { name: 'Посев газона', quantity: 1481.59, unit: 'm2', unitPrice: 180 },
-      ],
-    },
-  ],
-};
-
-const state = {
-  project: structuredClone(demoProject),
-  activeCoverageIndex: null,
-  planner: {
-    image: null,
-    scaleMetersPerPixel: null,
-    scalePoints: [],
-    mode: 'draw',
-    currentPolygon: [],
-    polygons: [],
-    polygonSeq: 1,
-    coverageTypes: [
-      { id: 't1', name: 'Асфальтобетон', color: '#6b7280', unitPrice: 1650 },
-      { id: 't2', name: 'Брусчатка', color: '#f59e0b', unitPrice: 2900 },
-      { id: 't3', name: 'Газон', color: '#22c55e', unitPrice: 950 },
-    ],
-    activeTypeId: 't1',
+const appState = {
+  mode: 'draw',
+  image: {
+    loaded: false,
+    width: 0,
+    height: 0,
   },
+  scale: {
+    metersPerPixel: null,
+    points: [],
+  },
+  currentContour: [], // image coordinates
+  materials: [
+    { id: 'm1', number: '1', name: 'Асфальт', color: '#6b7280', price: 1650 },
+    { id: 'm2', number: '2', name: 'Бетон', color: '#94a3b8', price: 2200 },
+    { id: 'm3', number: '3', name: 'Газон', color: '#22c55e', price: 950 },
+    { id: 'm4', number: '4', name: 'Брусчатка', color: '#f59e0b', price: 2900 },
+  ],
+  activeMaterialId: 'm1',
+  segments: [],
+  nextSegmentId: 1,
 };
 
-const tableBody = document.getElementById('coverageTableBody');
-const grandTotalCell = document.getElementById('grandTotal');
-const detailDialog = document.getElementById('detailDialog');
-const detailTitle = document.getElementById('detailTitle');
-const layerTableBody = document.getElementById('layerTableBody');
-const layerTotalCell = document.getElementById('layerTotal');
+const els = {
+  imageInput: document.getElementById('imageInput'),
+  planImage: document.getElementById('planImage'),
+  overlay: document.getElementById('overlay'),
+  stage: document.getElementById('stage'),
+  realDistanceInput: document.getElementById('realDistanceInput'),
+  modeScaleBtn: document.getElementById('modeScaleBtn'),
+  modeDrawBtn: document.getElementById('modeDrawBtn'),
+  scaleStatus: document.getElementById('scaleStatus'),
+  undoPointBtn: document.getElementById('undoPointBtn'),
+  clearContourBtn: document.getElementById('clearContourBtn'),
+  closeContourBtn: document.getElementById('closeContourBtn'),
+  materialSelect: document.getElementById('materialSelect'),
+  materialsBody: document.getElementById('materialsBody'),
+  newMaterialNumber: document.getElementById('newMaterialNumber'),
+  newMaterialName: document.getElementById('newMaterialName'),
+  newMaterialColor: document.getElementById('newMaterialColor'),
+  newMaterialPrice: document.getElementById('newMaterialPrice'),
+  addMaterialBtn: document.getElementById('addMaterialBtn'),
+  segmentsBody: document.getElementById('segmentsBody'),
+  estimateTotal: document.getElementById('estimateTotal'),
+};
 
-const canvas = document.getElementById('planCanvas');
-const ctx = canvas.getContext('2d');
-const scaleInfo = document.getElementById('scaleInfo');
-const knownDistanceInput = document.getElementById('knownDistanceInput');
-const polygonTableBody = document.getElementById('polygonTableBody');
-const typeTableBody = document.getElementById('typeTableBody');
-const activeTypeSelect = document.getElementById('activeTypeSelect');
+const ctx = els.overlay.getContext('2d');
 
-function formatMoney(value) {
-  return `${new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 2 }).format(value)} ₽`;
+function formatNumber(v, d = 2) {
+  return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: d }).format(v);
 }
 
-function formatNumber(value, digits = 2) {
-  return new Intl.NumberFormat('ru-RU', { maximumFractionDigits: digits }).format(value);
+function formatMoney(v) {
+  return `${formatNumber(v, 2)} ₽`;
 }
 
-function getLineTotal(item) {
-  return Number(item.quantity || 0) * Number(item.unitPrice || 0);
+function distance(a, b) {
+  return Math.hypot(b.x - a.x, b.y - a.y);
 }
 
-function buildUnitSelect(selectedUnit, onChange) {
-  const select = document.createElement('select');
-  unitOptions.forEach((option) => {
-    const opt = document.createElement('option');
-    opt.value = option.value;
-    opt.textContent = option.label;
-    opt.selected = option.value === selectedUnit;
-    select.appendChild(opt);
-  });
-  select.addEventListener('change', onChange);
-  return select;
-}
-
-function buildNumberInput(value, onChange, min = 0, step = '0.01') {
-  const input = document.createElement('input');
-  input.type = 'number';
-  input.value = String(value ?? 0);
-  input.min = String(min);
-  input.step = step;
-  input.addEventListener('input', onChange);
-  return input;
-}
-
-function getDistance(p1, p2) {
-  return Math.hypot(p2.x - p1.x, p2.y - p1.y);
-}
-
-function polygonAreaInPixels(points) {
-  let area = 0;
+function areaShoelace(points) {
+  let sum = 0;
   for (let i = 0; i < points.length; i += 1) {
-    const current = points[i];
-    const next = points[(i + 1) % points.length];
-    area += current.x * next.y - next.x * current.y;
+    const p1 = points[i];
+    const p2 = points[(i + 1) % points.length];
+    sum += p1.x * p2.y - p2.x * p1.y;
   }
-  return Math.abs(area) / 2;
+  return Math.abs(sum) * 0.5;
 }
 
-function polygonPerimeterInPixels(points) {
-  let perimeter = 0;
+function perimeter(points) {
+  let p = 0;
   for (let i = 0; i < points.length; i += 1) {
-    perimeter += getDistance(points[i], points[(i + 1) % points.length]);
+    p += distance(points[i], points[(i + 1) % points.length]);
   }
-  return perimeter;
+  return p;
 }
 
-function getTypeById(typeId) {
-  return state.planner.coverageTypes.find((type) => type.id === typeId);
+function getActiveMaterial() {
+  return appState.materials.find((m) => m.id === appState.activeMaterialId);
 }
 
-function renderCoverageTable() {
-  tableBody.innerHTML = '';
-
-  state.project.coverages.forEach((coverage, index) => {
-    const row = document.createElement('tr');
-
-    const codeCell = document.createElement('td');
-    codeCell.textContent = coverage.code;
-
-    const nameCell = document.createElement('td');
-    nameCell.textContent = coverage.name;
-
-    const quantityCell = document.createElement('td');
-    quantityCell.appendChild(
-      buildNumberInput(coverage.quantity, (event) => {
-        coverage.quantity = Number(event.target.value);
-        renderCoverageTable();
-      }),
-    );
-
-    const unitCell = document.createElement('td');
-    unitCell.appendChild(
-      buildUnitSelect(coverage.unit, (event) => {
-        coverage.unit = event.target.value;
-      }),
-    );
-
-    const priceCell = document.createElement('td');
-    priceCell.appendChild(
-      buildNumberInput(coverage.unitPrice, (event) => {
-        coverage.unitPrice = Number(event.target.value);
-        renderCoverageTable();
-      }),
-    );
-
-    const totalCell = document.createElement('td');
-    totalCell.textContent = formatMoney(getLineTotal(coverage));
-
-    const detailsCell = document.createElement('td');
-    const detailsButton = document.createElement('button');
-    detailsButton.type = 'button';
-    detailsButton.className = 'layer-details-btn';
-    detailsButton.textContent = coverage.layers?.length ? 'Открыть' : '—';
-    detailsButton.disabled = !coverage.layers?.length;
-    if (coverage.layers?.length) {
-      detailsButton.addEventListener('click', () => openDetails(index));
-    }
-    detailsCell.appendChild(detailsButton);
-
-    row.append(codeCell, nameCell, quantityCell, unitCell, priceCell, totalCell, detailsCell);
-    tableBody.appendChild(row);
-  });
-
-  const grandTotal = state.project.coverages.reduce((sum, coverage) => sum + getLineTotal(coverage), 0);
-  grandTotalCell.textContent = formatMoney(grandTotal);
-}
-
-function openDetails(coverageIndex) {
-  state.activeCoverageIndex = coverageIndex;
-  const coverage = state.project.coverages[coverageIndex];
-  detailTitle.textContent = `Детальный расчет: ${coverage.code} — ${coverage.name}`;
-  renderLayerTable();
-  detailDialog.showModal();
-}
-
-function renderLayerTable() {
-  if (state.activeCoverageIndex === null) {
-    return;
+function getImageToCssScale() {
+  const rect = els.overlay.getBoundingClientRect();
+  if (!appState.image.loaded || rect.width === 0 || rect.height === 0) {
+    return { sx: 1, sy: 1 };
   }
-
-  const coverage = state.project.coverages[state.activeCoverageIndex];
-  layerTableBody.innerHTML = '';
-
-  coverage.layers.forEach((layer) => {
-    const row = document.createElement('tr');
-
-    const nameCell = document.createElement('td');
-    nameCell.textContent = layer.name;
-
-    const quantityCell = document.createElement('td');
-    quantityCell.appendChild(
-      buildNumberInput(layer.quantity, (event) => {
-        layer.quantity = Number(event.target.value);
-        renderLayerTable();
-      }),
-    );
-
-    const unitCell = document.createElement('td');
-    unitCell.appendChild(
-      buildUnitSelect(layer.unit, (event) => {
-        layer.unit = event.target.value;
-      }),
-    );
-
-    const priceCell = document.createElement('td');
-    priceCell.appendChild(
-      buildNumberInput(layer.unitPrice, (event) => {
-        layer.unitPrice = Number(event.target.value);
-        renderLayerTable();
-      }),
-    );
-
-    const totalCell = document.createElement('td');
-    totalCell.textContent = formatMoney(getLineTotal(layer));
-
-    row.append(nameCell, quantityCell, unitCell, priceCell, totalCell);
-    layerTableBody.appendChild(row);
-  });
-
-  const layerTotal = coverage.layers.reduce((sum, layer) => sum + getLineTotal(layer), 0);
-  layerTotalCell.textContent = formatMoney(layerTotal);
-
-  coverage.unitPrice = coverage.quantity > 0 ? layerTotal / coverage.quantity : 0;
-  renderCoverageTable();
-}
-
-function validateProjectPayload(payload) {
-  return (
-    payload
-    && Array.isArray(payload.coverages)
-    && payload.coverages.every(
-      (coverage) =>
-        typeof coverage.code === 'string'
-        && typeof coverage.name === 'string'
-        && typeof coverage.quantity === 'number'
-        && typeof coverage.unitPrice === 'number'
-        && Array.isArray(coverage.layers),
-    )
-  );
-}
-
-function redrawCanvas() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  if (state.planner.image) {
-    ctx.drawImage(state.planner.image, 0, 0, canvas.width, canvas.height);
-  } else {
-    ctx.fillStyle = '#f3f4f6';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#6b7280';
-    ctx.fillText('Загрузите изображение плана', 20, 30);
-  }
-
-  state.planner.polygons.forEach((polygon) => {
-    const type = getTypeById(polygon.typeId);
-    const color = type?.color || '#22c55e';
-    if (polygon.points.length < 3) {
-      return;
-    }
-
-    ctx.beginPath();
-    ctx.moveTo(polygon.points[0].x, polygon.points[0].y);
-    polygon.points.slice(1).forEach((point) => ctx.lineTo(point.x, point.y));
-    ctx.closePath();
-    ctx.fillStyle = `${color}66`;
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = color;
-    ctx.stroke();
-  });
-
-  if (state.planner.currentPolygon.length) {
-    ctx.beginPath();
-    ctx.moveTo(state.planner.currentPolygon[0].x, state.planner.currentPolygon[0].y);
-    state.planner.currentPolygon.slice(1).forEach((point) => ctx.lineTo(point.x, point.y));
-    ctx.strokeStyle = '#2563eb';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    state.planner.currentPolygon.forEach((point) => {
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, 4, 0, Math.PI * 2);
-      ctx.fillStyle = '#1d4ed8';
-      ctx.fill();
-    });
-  }
-
-  if (state.planner.mode === 'scale') {
-    state.planner.scalePoints.forEach((point) => {
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
-      ctx.fillStyle = '#dc2626';
-      ctx.fill();
-    });
-
-    if (state.planner.scalePoints.length === 2) {
-      ctx.beginPath();
-      ctx.moveTo(state.planner.scalePoints[0].x, state.planner.scalePoints[0].y);
-      ctx.lineTo(state.planner.scalePoints[1].x, state.planner.scalePoints[1].y);
-      ctx.strokeStyle = '#dc2626';
-      ctx.lineWidth = 2;
-      ctx.stroke();
-    }
-  }
-}
-
-function recalculatePolygonGeometry(polygon) {
-  if (!state.planner.scaleMetersPerPixel) {
-    polygon.area = 0;
-    polygon.perimeter = 0;
-    return;
-  }
-
-  const areaPx = polygonAreaInPixels(polygon.points);
-  const perimeterPx = polygonPerimeterInPixels(polygon.points);
-  polygon.area = areaPx * state.planner.scaleMetersPerPixel ** 2;
-  polygon.perimeter = perimeterPx * state.planner.scaleMetersPerPixel;
-}
-
-function renderTypes() {
-  typeTableBody.innerHTML = '';
-  activeTypeSelect.innerHTML = '';
-
-  state.planner.coverageTypes.forEach((type) => {
-    const option = document.createElement('option');
-    option.value = type.id;
-    option.textContent = type.name;
-    option.selected = type.id === state.planner.activeTypeId;
-    activeTypeSelect.appendChild(option);
-
-    const row = document.createElement('tr');
-
-    const colorCell = document.createElement('td');
-    const colorInput = document.createElement('input');
-    colorInput.type = 'color';
-    colorInput.value = type.color;
-    colorInput.addEventListener('input', (event) => {
-      type.color = event.target.value;
-      redrawCanvas();
-    });
-    colorCell.appendChild(colorInput);
-
-    const nameCell = document.createElement('td');
-    const nameInput = document.createElement('input');
-    nameInput.type = 'text';
-    nameInput.value = type.name;
-    nameInput.addEventListener('input', (event) => {
-      type.name = event.target.value;
-      renderTypes();
-      renderPolygonTable();
-    });
-    nameCell.appendChild(nameInput);
-
-    const priceCell = document.createElement('td');
-    priceCell.appendChild(
-      buildNumberInput(type.unitPrice, (event) => {
-        type.unitPrice = Number(event.target.value);
-      }, 0, '1'),
-    );
-
-    row.append(colorCell, nameCell, priceCell);
-    typeTableBody.appendChild(row);
-  });
-}
-
-function renderPolygonTable() {
-  polygonTableBody.innerHTML = '';
-
-  state.planner.polygons.forEach((polygon) => {
-    const row = document.createElement('tr');
-    const type = getTypeById(polygon.typeId);
-
-    const idCell = document.createElement('td');
-    idCell.textContent = String(polygon.id);
-
-    const typeCell = document.createElement('td');
-    const typeSelect = document.createElement('select');
-    state.planner.coverageTypes.forEach((coverageType) => {
-      const option = document.createElement('option');
-      option.value = coverageType.id;
-      option.textContent = coverageType.name;
-      option.selected = coverageType.id === polygon.typeId;
-      typeSelect.appendChild(option);
-    });
-    typeSelect.addEventListener('change', (event) => {
-      polygon.typeId = event.target.value;
-      renderPolygonTable();
-      redrawCanvas();
-    });
-    typeCell.appendChild(typeSelect);
-
-    const areaCell = document.createElement('td');
-    areaCell.textContent = formatNumber(polygon.area, 2);
-
-    const perimeterCell = document.createElement('td');
-    perimeterCell.textContent = formatNumber(polygon.perimeter, 2);
-
-    const actionCell = document.createElement('td');
-    const addButton = document.createElement('button');
-    addButton.type = 'button';
-    addButton.textContent = 'Добавить';
-    addButton.addEventListener('click', () => {
-      addPolygonToEstimate(polygon, type);
-    });
-    actionCell.appendChild(addButton);
-
-    row.append(idCell, typeCell, areaCell, perimeterCell, actionCell);
-    polygonTableBody.appendChild(row);
-  });
-}
-
-function addPolygonToEstimate(polygon, type) {
-  if (!polygon.area || !type) {
-    alert('Нельзя добавить участок без масштаба или без типа покрытия.');
-    return;
-  }
-
-  const existing = state.project.coverages.find(
-    (coverage) => coverage.name === type.name && coverage.unit === 'm2' && coverage.source === 'image-planner',
-  );
-
-  if (existing) {
-    existing.quantity += polygon.area;
-    existing.meta.perimeter += polygon.perimeter;
-  } else {
-    state.project.coverages.push({
-      code: `IMG-${state.project.coverages.length + 1}`,
-      name: type.name,
-      quantity: polygon.area,
-      unit: 'm2',
-      unitPrice: type.unitPrice,
-      layers: [],
-      source: 'image-planner',
-      meta: { perimeter: polygon.perimeter },
-    });
-  }
-
-  renderCoverageTable();
-  alert(`Участок ${polygon.id} добавлен в смету: ${type.name}.`);
-}
-
-function setScaleFromPoints() {
-  if (state.planner.scalePoints.length !== 2) {
-    return;
-  }
-
-  const pixelDistance = getDistance(state.planner.scalePoints[0], state.planner.scalePoints[1]);
-  const meters = Number(knownDistanceInput.value);
-  if (!pixelDistance || !meters || meters <= 0) {
-    alert('Введите корректную реальную дистанцию в метрах.');
-    return;
-  }
-
-  state.planner.scaleMetersPerPixel = meters / pixelDistance;
-  state.planner.polygons.forEach(recalculatePolygonGeometry);
-  renderPolygonTable();
-  scaleInfo.textContent = `1 px = ${formatNumber(state.planner.scaleMetersPerPixel, 4)} м`;
-}
-
-canvas.addEventListener('click', (event) => {
-  const rect = canvas.getBoundingClientRect();
-  const point = {
-    x: event.clientX - rect.left,
-    y: event.clientY - rect.top,
+  return {
+    sx: rect.width / appState.image.width,
+    sy: rect.height / appState.image.height,
   };
+}
 
-  if (state.planner.mode === 'scale') {
-    if (state.planner.scalePoints.length >= 2) {
-      state.planner.scalePoints = [];
-    }
-    state.planner.scalePoints.push(point);
+function clientToImagePoint(clientX, clientY) {
+  const rect = els.overlay.getBoundingClientRect();
+  const xCss = clientX - rect.left;
+  const yCss = clientY - rect.top;
 
-    if (state.planner.scalePoints.length === 2) {
-      setScaleFromPoints();
-      state.planner.mode = 'draw';
-    }
+  const x = (xCss * appState.image.width) / rect.width;
+  const y = (yCss * appState.image.height) / rect.height;
+  return {
+    x: Math.max(0, Math.min(appState.image.width, x)),
+    y: Math.max(0, Math.min(appState.image.height, y)),
+  };
+}
 
-    redrawCanvas();
+function imageToCssPoint(p) {
+  const { sx, sy } = getImageToCssScale();
+  return { x: p.x * sx, y: p.y * sy };
+}
+
+function syncOverlaySize() {
+  const rect = els.stage.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  els.overlay.width = Math.max(1, Math.round(rect.width * dpr));
+  els.overlay.height = Math.max(1, Math.round(rect.height * dpr));
+  els.overlay.style.width = `${Math.round(rect.width)}px`;
+  els.overlay.style.height = `${Math.round(rect.height)}px`;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  redraw();
+}
+
+function drawPoint(pCss, color = '#2563eb', radius = 4) {
+  ctx.beginPath();
+  ctx.arc(pCss.x, pCss.y, radius, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+function drawPolyline(pointsImage, color, close = false) {
+  if (!pointsImage.length) return;
+  const first = imageToCssPoint(pointsImage[0]);
+  ctx.beginPath();
+  ctx.moveTo(first.x, first.y);
+  pointsImage.slice(1).forEach((p) => {
+    const c = imageToCssPoint(p);
+    ctx.lineTo(c.x, c.y);
+  });
+  if (close) ctx.closePath();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+function drawPolygonFill(pointsImage, color) {
+  if (pointsImage.length < 3) return;
+  const first = imageToCssPoint(pointsImage[0]);
+  ctx.beginPath();
+  ctx.moveTo(first.x, first.y);
+  pointsImage.slice(1).forEach((p) => {
+    const c = imageToCssPoint(p);
+    ctx.lineTo(c.x, c.y);
+  });
+  ctx.closePath();
+  ctx.fillStyle = `${color}55`;
+  ctx.fill();
+}
+
+function redraw() {
+  const rect = els.overlay.getBoundingClientRect();
+  ctx.clearRect(0, 0, rect.width, rect.height);
+
+  appState.segments.forEach((segment) => {
+    const material = appState.materials.find((m) => m.id === segment.materialId);
+    const color = material?.color || '#64748b';
+    drawPolygonFill(segment.points, color);
+    drawPolyline(segment.points, color, true);
+  });
+
+  if (appState.mode === 'scale') {
+    drawPolyline(appState.scale.points, '#dc2626', false);
+    appState.scale.points.forEach((p) => drawPoint(imageToCssPoint(p), '#dc2626', 5));
+  }
+
+  if (appState.currentContour.length) {
+    drawPolyline(appState.currentContour, '#2563eb', false);
+    appState.currentContour.forEach((p) => drawPoint(imageToCssPoint(p), '#2563eb', 4));
+  }
+}
+
+function setMode(mode) {
+  appState.mode = mode;
+  els.modeScaleBtn.classList.toggle('mode-active', mode === 'scale');
+  els.modeDrawBtn.classList.toggle('mode-active', mode === 'draw');
+}
+
+function updateScaleStatus() {
+  if (!appState.scale.metersPerPixel) {
+    els.scaleStatus.textContent = 'Масштаб: не задан';
+    return;
+  }
+  const sq = appState.scale.metersPerPixel ** 2;
+  els.scaleStatus.textContent = `Масштаб: 1 px = ${formatNumber(appState.scale.metersPerPixel, 5)} м | 1 px² = ${formatNumber(sq, 7)} м²`;
+}
+
+function renderMaterials() {
+  els.materialSelect.innerHTML = '';
+  els.materialsBody.innerHTML = '';
+
+  appState.materials.forEach((m) => {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = `${m.number} — ${m.name}`;
+    opt.selected = m.id === appState.activeMaterialId;
+    els.materialSelect.appendChild(opt);
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${m.number}</td>
+      <td>${m.name}</td>
+      <td><span class="color-dot" style="background:${m.color}"></span></td>
+      <td>${formatNumber(m.price, 2)}</td>
+    `;
+    els.materialsBody.appendChild(tr);
+  });
+}
+
+function recalcSegment(segment) {
+  const material = appState.materials.find((m) => m.id === segment.materialId);
+  const pxArea = areaShoelace(segment.points);
+  const pxPerimeter = perimeter(segment.points);
+  segment.area = pxArea * (appState.scale.metersPerPixel ** 2);
+  segment.perimeter = pxPerimeter * appState.scale.metersPerPixel;
+  segment.price = material ? material.price : 0;
+  segment.total = segment.area * segment.price;
+}
+
+function renderEstimate() {
+  els.segmentsBody.innerHTML = '';
+  let total = 0;
+
+  appState.segments.forEach((s) => {
+    const material = appState.materials.find((m) => m.id === s.materialId);
+    total += s.total;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${s.id}</td>
+      <td>${material?.number ?? '-'}</td>
+      <td>${material?.name ?? 'Удалённое покрытие'}</td>
+      <td>${formatNumber(s.area, 2)}</td>
+      <td>${formatNumber(s.perimeter, 2)}</td>
+      <td>${formatNumber(s.price, 2)}</td>
+      <td>${formatMoney(s.total)}</td>
+      <td><button type="button" data-remove="${s.id}">Удалить</button></td>
+    `;
+    els.segmentsBody.appendChild(tr);
+  });
+
+  els.estimateTotal.textContent = formatMoney(total);
+}
+
+function closeCurrentContour() {
+  if (appState.currentContour.length < 3) {
+    alert('Нельзя замкнуть контур: нужно минимум 3 точки.');
+    return;
+  }
+  if (!appState.scale.metersPerPixel) {
+    alert('Сначала задайте масштаб по двум точкам.');
     return;
   }
 
-  state.planner.currentPolygon.push(point);
-  redrawCanvas();
-});
-
-document.getElementById('startScaleBtn').addEventListener('click', () => {
-  state.planner.mode = 'scale';
-  state.planner.scalePoints = [];
-  redrawCanvas();
-});
-
-document.getElementById('undoPointBtn').addEventListener('click', () => {
-  state.planner.currentPolygon.pop();
-  redrawCanvas();
-});
-
-document.getElementById('clearCurrentBtn').addEventListener('click', () => {
-  state.planner.currentPolygon = [];
-  redrawCanvas();
-});
-
-document.getElementById('finishPolygonBtn').addEventListener('click', () => {
-  if (state.planner.currentPolygon.length < 3) {
-    alert('Нужно минимум 3 точки, чтобы замкнуть контур.');
+  const material = getActiveMaterial();
+  if (!material) {
+    alert('Выберите покрытие для контура.');
     return;
   }
 
-  const polygon = {
-    id: state.planner.polygonSeq,
-    typeId: state.planner.activeTypeId,
-    points: [...state.planner.currentPolygon],
+  const segment = {
+    id: appState.nextSegmentId,
+    materialId: material.id,
+    points: appState.currentContour.map((p) => ({ ...p })),
     area: 0,
     perimeter: 0,
+    price: 0,
+    total: 0,
   };
-  recalculatePolygonGeometry(polygon);
-  state.planner.polygons.push(polygon);
-  state.planner.polygonSeq += 1;
-  state.planner.currentPolygon = [];
-  renderPolygonTable();
-  redrawCanvas();
-});
+  recalcSegment(segment);
 
-activeTypeSelect.addEventListener('change', (event) => {
-  state.planner.activeTypeId = event.target.value;
-});
+  appState.nextSegmentId += 1;
+  appState.segments.push(segment);
+  appState.currentContour = [];
+  renderEstimate();
+  redraw();
+}
 
-document.getElementById('addTypeBtn').addEventListener('click', () => {
-  const typeName = document.getElementById('typeNameInput').value.trim();
-  const typeColor = document.getElementById('typeColorInput').value;
-  const typePrice = Number(document.getElementById('typePriceInput').value);
+function addMaterial() {
+  const number = els.newMaterialNumber.value.trim();
+  const name = els.newMaterialName.value.trim();
+  const color = els.newMaterialColor.value;
+  const price = Number(els.newMaterialPrice.value);
 
-  if (!typeName) {
-    alert('Введите название типа покрытия.');
+  if (!name) {
+    alert('Нельзя добавить покрытие без названия.');
     return;
   }
 
-  const typeId = `t${Date.now()}`;
-  state.planner.coverageTypes.push({
-    id: typeId,
-    name: typeName,
-    color: typeColor,
-    unitPrice: Number.isFinite(typePrice) ? typePrice : 0,
+  const id = `m${Date.now()}`;
+  appState.materials.push({
+    id,
+    number: number || String(appState.materials.length + 1),
+    name,
+    color,
+    price: Number.isFinite(price) ? Math.max(0, price) : 0,
   });
-  state.planner.activeTypeId = typeId;
-  renderTypes();
-  redrawCanvas();
-});
+  appState.activeMaterialId = id;
+  renderMaterials();
+  renderEstimate();
+  redraw();
 
-document.getElementById('planImageFile').addEventListener('change', (event) => {
-  const [file] = event.target.files;
-  if (!file) {
+  els.newMaterialName.value = '';
+}
+
+function handleCanvasClick(event) {
+  if (!appState.image.loaded) {
     return;
   }
 
-  const image = new Image();
-  image.onload = () => {
-    const maxWidth = 1100;
-    const scale = Math.min(1, maxWidth / image.width);
-    canvas.width = Math.round(image.width * scale);
-    canvas.height = Math.round(image.height * scale);
-    state.planner.image = image;
+  const p = clientToImagePoint(event.clientX, event.clientY);
 
-    state.planner.polygons = [];
-    state.planner.currentPolygon = [];
-    state.planner.scaleMetersPerPixel = null;
-    state.planner.scalePoints = [];
-    scaleInfo.textContent = 'Масштаб не задан';
+  if (appState.mode === 'scale') {
+    if (appState.scale.points.length === 2) {
+      appState.scale.points = [];
+      appState.scale.metersPerPixel = null;
+    }
+    appState.scale.points.push(p);
 
-    redrawCanvas();
-    renderPolygonTable();
+    if (appState.scale.points.length === 2) {
+      const px = distance(appState.scale.points[0], appState.scale.points[1]);
+      const m = Number(els.realDistanceInput.value);
+      if (!m || m <= 0 || !px) {
+        alert('Введите корректное расстояние в метрах.');
+        return;
+      }
+      appState.scale.metersPerPixel = m / px;
+      appState.segments.forEach(recalcSegment);
+      renderEstimate();
+      updateScaleStatus();
+      setMode('draw');
+    }
+
+    redraw();
+    return;
+  }
+
+  appState.currentContour.push(p);
+  redraw();
+}
+
+function loadImage(file) {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    els.planImage.src = url;
+    appState.image.loaded = true;
+    appState.image.width = img.naturalWidth;
+    appState.image.height = img.naturalHeight;
+
+    appState.scale = { metersPerPixel: null, points: [] };
+    appState.currentContour = [];
+    appState.segments = [];
+    appState.nextSegmentId = 1;
+
+    requestAnimationFrame(() => {
+      syncOverlaySize();
+      updateScaleStatus();
+      renderEstimate();
+      redraw();
+    });
   };
-  image.src = URL.createObjectURL(file);
+  img.src = url;
+}
+
+els.imageInput.addEventListener('change', (e) => {
+  const file = e.target.files?.[0];
+  if (file) loadImage(file);
+});
+els.modeScaleBtn.addEventListener('click', () => setMode('scale'));
+els.modeDrawBtn.addEventListener('click', () => setMode('draw'));
+els.undoPointBtn.addEventListener('click', () => {
+  appState.currentContour.pop();
+  redraw();
+});
+els.clearContourBtn.addEventListener('click', () => {
+  appState.currentContour = [];
+  redraw();
+});
+els.closeContourBtn.addEventListener('click', closeCurrentContour);
+els.addMaterialBtn.addEventListener('click', addMaterial);
+els.materialSelect.addEventListener('change', (e) => {
+  appState.activeMaterialId = e.target.value;
+});
+els.overlay.addEventListener('click', handleCanvasClick);
+els.segmentsBody.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-remove]');
+  if (!btn) return;
+  const id = Number(btn.dataset.remove);
+  appState.segments = appState.segments.filter((s) => s.id !== id);
+  renderEstimate();
+  redraw();
 });
 
-document.getElementById('projectFile').addEventListener('change', async (event) => {
-  const [file] = event.target.files;
-  if (!file) {
-    return;
-  }
+window.addEventListener('resize', syncOverlaySize);
 
-  try {
-    const parsed = JSON.parse(await file.text());
-    if (!validateProjectPayload(parsed)) {
-      alert('Неверный формат JSON. Ожидается объект с массивом coverages.');
-      return;
-    }
-
-    state.project = parsed;
-    state.activeCoverageIndex = null;
-    if (detailDialog.open) {
-      detailDialog.close();
-    }
-    renderCoverageTable();
-  } catch {
-    alert('Не удалось прочитать JSON файл проекта.');
-  }
-});
-
-document.getElementById('loadDemoBtn').addEventListener('click', () => {
-  state.project = structuredClone(demoProject);
-  state.activeCoverageIndex = null;
-  if (detailDialog.open) {
-    detailDialog.close();
-  }
-  renderCoverageTable();
-});
-
-renderCoverageTable();
-renderTypes();
-renderPolygonTable();
-redrawCanvas();
+setMode('draw');
+renderMaterials();
+renderEstimate();
+updateScaleStatus();
+syncOverlaySize();
