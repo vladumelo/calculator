@@ -1,11 +1,13 @@
 const state = {
-  mode: 'polygon', // polygon | points | pan | scale
+  mode: 'polygon', // polygon (freehand) | points | pan | scale
+  modeBeforeScale: 'polygon',
   panning: false,
   freehandDrawing: false,
   selectedSegmentId: null,
+  hoverImagePoint: null,
   image: { el: new Image(), loaded: false, width: 0, height: 0 },
   viewport: { zoom: 1, minZoom: 0.2, maxZoom: 14, offsetX: 0, offsetY: 0 },
-  scale: { metersPerPixel: null, points: [] },
+  scale: { metersPerPixel: null, points: [], awaitingDistance: false },
   currentContour: [],
   materials: [
     { id: 'm1', name: 'Асфальт', color: '#6b7280', price: 1650 },
@@ -32,6 +34,13 @@ const el = {
   toolPoints: document.getElementById('toolPoints'),
   toolPan: document.getElementById('toolPan'),
   toolDelete: document.getElementById('toolDelete'),
+  toolUndo: document.getElementById('toolUndo'),
+  toolClear: document.getElementById('toolClear'),
+  toolScale: document.getElementById('toolScale'),
+  scaleDistanceBox: document.getElementById('scaleDistanceBox'),
+  scaleDistanceInput: document.getElementById('scaleDistanceInput'),
+  applyScaleBtn: document.getElementById('applyScaleBtn'),
+  cancelScaleBtn: document.getElementById('cancelScaleBtn'),
 };
 
 const ctx = el.canvas.getContext('2d');
@@ -48,11 +57,6 @@ function areaShoelace(points) {
     s += a.x * b.y - b.x * a.y;
   }
   return Math.abs(s) / 2;
-}
-function perim(points) {
-  let p = 0;
-  for (let i = 0; i < points.length; i += 1) p += dist(points[i], points[(i + 1) % points.length]);
-  return p;
 }
 function pointInPolygon(point, poly) {
   let inside = false;
@@ -112,9 +116,7 @@ function recalcSegment(s) {
   const m = getMaterial(s.materialId);
   const k = state.scale.metersPerPixel || 0;
   const baseArea = areaShoelace(s.points) * (k ** 2);
-  const basePerim = perim(s.points) * k;
   s.baseArea = baseArea;
-  s.basePerimeter = basePerim;
   if (!s.areaManual) s.area = baseArea;
   if (!s.priceManual) s.price = m ? m.price : 0;
   s.total = s.area * s.price;
@@ -175,17 +177,33 @@ function render() {
     drawPolygon(s.points, s.id === state.selectedSegmentId ? '#2563eb' : (m?.color || '#64748b'), true, false, s.id === state.selectedSegmentId ? 3 : 2);
   });
 
-  if (state.mode === 'scale') {
+  if (state.mode === 'scale' || state.scale.awaitingDistance) {
     drawPolygon(state.scale.points, '#ef4444', false, false, 2);
     state.scale.points.forEach((p) => drawPoint(p, '#ef4444', 5));
   }
 
   if (state.currentContour.length) {
     drawPolygon(state.currentContour, '#2563eb', false, false, 2);
-    state.currentContour.forEach((p) => drawPoint(p, '#60a5fa', 3));
+    state.currentContour.slice(0, -1).forEach((p) => drawPoint(p, '#60a5fa', 3));
+    drawPoint(state.currentContour[state.currentContour.length - 1], '#1d4ed8', 5); // последняя точка
+
+    if (state.hoverImagePoint && (state.mode === 'points' || state.mode === 'polygon')) {
+      const a = imageToCanvas(state.currentContour[state.currentContour.length - 1]);
+      const b = imageToCanvas(state.hoverImagePoint);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.setLineDash([6, 5]);
+      ctx.strokeStyle = '#93c5fd';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
   }
 
   el.canvas.classList.toggle('pan', state.mode === 'pan');
+  el.toolUndo.disabled = state.currentContour.length === 0;
+  el.toolClear.disabled = state.currentContour.length === 0;
 }
 
 function renderMaterialsSelect() {
@@ -233,6 +251,7 @@ function setMode(mode) {
   el.toolPolygon.classList.toggle('active', mode === 'polygon');
   el.toolPoints.classList.toggle('active', mode === 'points');
   el.toolPan.classList.toggle('active', mode === 'pan');
+  el.toolScale.classList.toggle('active', mode === 'scale' || state.scale.awaitingDistance);
 }
 
 function createSegmentFromContour(points) {
@@ -251,7 +270,6 @@ function createSegmentFromContour(points) {
     materialId: state.activeMaterialId,
     points: points.map((p) => ({ ...p })),
     baseArea: 0,
-    basePerimeter: 0,
     area: 0,
     areaManual: false,
     price: 0,
@@ -281,30 +299,20 @@ function addPointOrScale(clientX, clientY) {
   const p = canvasToImage(clientToCanvas(clientX, clientY));
 
   if (state.mode === 'scale') {
-    if (state.scale.points.length === 2) state.scale.points = [];
+    if (state.scale.points.length >= 2) state.scale.points = [];
     state.scale.points.push(p);
     if (state.scale.points.length === 2) {
-      const px = dist(state.scale.points[0], state.scale.points[1]);
-      const meters = 10;
-      // scale distance set via prompt-like quick value from button action
-      const input = Number(prompt('Реальная дистанция в метрах:', '10'));
-      if (px && input > 0) {
-        state.scale.metersPerPixel = input / px;
-        recalcAll();
-        renderEstimate();
-      }
+      state.scale.awaitingDistance = true;
+      el.scaleDistanceBox.classList.remove('hidden');
+      el.scaleDistanceInput.focus();
     }
     render();
     return;
   }
 
   if (state.mode === 'points') {
-    if (state.currentContour.length >= 3 && dist(state.currentContour[0], p) < 8 / state.viewport.zoom) {
-      createSegmentFromContour(state.currentContour);
-    } else {
-      state.currentContour.push(p);
-      render();
-    }
+    state.currentContour.push(p);
+    render();
   }
 }
 
@@ -331,6 +339,45 @@ function endFreehand() {
   else state.currentContour = [];
 }
 
+function undoPoint() {
+  if (!state.currentContour.length) return;
+  state.currentContour.pop();
+  render();
+}
+
+function clearCurrentPolygon() {
+  state.currentContour = [];
+  state.hoverImagePoint = null;
+  render();
+}
+
+function startScaleTool() {
+  state.modeBeforeScale = state.mode;
+  state.scale.points = [];
+  state.scale.awaitingDistance = false;
+  el.scaleDistanceBox.classList.add('hidden');
+  setMode('scale');
+  render();
+}
+
+function applyScaleDistance() {
+  if (state.scale.points.length !== 2) return;
+  const px = dist(state.scale.points[0], state.scale.points[1]);
+  const meters = Number(el.scaleDistanceInput.value);
+  if (!px || meters <= 0) {
+    alert('Введите корректное расстояние в метрах.');
+    return;
+  }
+  state.scale.metersPerPixel = meters / px;
+  state.scale.awaitingDistance = false;
+  state.scale.points = [];
+  el.scaleDistanceBox.classList.add('hidden');
+  recalcAll();
+  renderEstimate();
+  setMode(state.modeBeforeScale === 'scale' ? 'points' : state.modeBeforeScale);
+  render();
+}
+
 el.imageInput.addEventListener('change', (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
@@ -343,7 +390,8 @@ el.imageInput.addEventListener('change', (e) => {
     state.segments = [];
     state.selectedSegmentId = null;
     state.nextId = 1;
-    state.scale = { metersPerPixel: null, points: [] };
+    state.scale = { metersPerPixel: null, points: [], awaitingDistance: false };
+    el.scaleDistanceBox.classList.add('hidden');
     fitToScreen();
     renderEstimate();
     updateMeta();
@@ -351,10 +399,17 @@ el.imageInput.addEventListener('change', (e) => {
   state.image.el.src = url;
 });
 
-el.setScaleBtn.addEventListener('click', () => {
-  setMode('scale');
-  alert('Режим масштаба: поставьте 2 точки на плане.');
+el.setScaleBtn.addEventListener('click', startScaleTool);
+el.toolScale.addEventListener('click', startScaleTool);
+el.applyScaleBtn.addEventListener('click', applyScaleDistance);
+el.cancelScaleBtn.addEventListener('click', () => {
+  state.scale.awaitingDistance = false;
+  state.scale.points = [];
+  el.scaleDistanceBox.classList.add('hidden');
+  setMode(state.modeBeforeScale === 'scale' ? 'points' : state.modeBeforeScale);
+  render();
 });
+
 el.materialSelect.addEventListener('change', (e) => { state.activeMaterialId = e.target.value; });
 el.exportBtn.addEventListener('click', () => {
   const rows = [['Участок', 'Покрытие', 'Площадь м2', 'Цена', 'Стоимость']];
@@ -380,6 +435,8 @@ el.toolDelete.addEventListener('click', () => {
   renderEstimate();
   render();
 });
+el.toolUndo.addEventListener('click', undoPoint);
+el.toolClear.addEventListener('click', clearCurrentPolygon);
 
 el.canvas.addEventListener('mousedown', (e) => {
   if (e.button === 2) {
@@ -415,8 +472,15 @@ el.canvas.addEventListener('mousedown', (e) => {
   }
 });
 
+el.canvas.addEventListener('dblclick', () => {
+  if (state.mode === 'points' && state.currentContour.length >= 3) {
+    createSegmentFromContour(state.currentContour);
+  }
+});
+
 window.addEventListener('mousemove', (e) => {
   const img = canvasToImage(clientToCanvas(e.clientX, e.clientY));
+  state.hoverImagePoint = img;
   updateMeta(img);
 
   if (state.panning && state.panStart) {
@@ -427,6 +491,7 @@ window.addEventListener('mousemove', (e) => {
   }
 
   if (state.freehandDrawing) moveFreehand(e.clientX, e.clientY);
+  else if (state.currentContour.length && (state.mode === 'points' || state.mode === 'polygon')) render();
 });
 
 window.addEventListener('mouseup', () => {
@@ -444,13 +509,9 @@ el.canvas.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Delete' || e.key === 'Backspace') {
-    state.currentContour.pop();
-    render();
-  }
-  if (e.key === 'Enter' && state.mode === 'points' && state.currentContour.length >= 3) {
-    createSegmentFromContour(state.currentContour);
-  }
+  if (e.key === 'Delete' || e.key === 'Backspace') undoPoint();
+  if (e.key === 'Enter' && state.mode === 'points' && state.currentContour.length >= 3) createSegmentFromContour(state.currentContour);
+  if (e.key === 'Escape') clearCurrentPolygon();
 });
 
 el.estimateBody.addEventListener('click', (e) => {

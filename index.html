@@ -23,15 +23,29 @@
 
         <button id="exportBtn" class="btn ghost" type="button">Экспорт</button>
 
+        <div id="scaleDistanceBox" class="scale-box hidden">
+          <label>Введите реальное расстояние (м)
+            <input id="scaleDistanceInput" type="number" min="0.01" step="0.01" value="10" />
+          </label>
+          <button id="applyScaleBtn" class="btn" type="button">Применить</button>
+          <button id="cancelScaleBtn" class="btn ghost" type="button">Отмена</button>
+        </div>
+
         <div class="meta" id="metaBar">Масштаб: — | Zoom: 100% | Текущий участок: —</div>
       </header>
 
       <section class="workspace card">
         <aside class="toolbar">
-          <button id="toolPolygon" class="tool active" title="Полигон (свободная форма)">✏️</button>
-          <button id="toolPoints" class="tool" title="Точки (по кликам)">🔷</button>
+          <div class="tool-title">TOOLS</div>
+          <button id="toolPolygon" class="tool active" title="Полигон: рисование участков">✏️</button>
+          <button id="toolUndo" class="tool" title="Отменить последнюю точку">↩️</button>
+          <button id="toolClear" class="tool" title="Удалить текущий полигон">🧹</button>
           <button id="toolPan" class="tool" title="Панорама">✋</button>
           <button id="toolDelete" class="tool danger" title="Удалить выбранный участок">🗑</button>
+
+          <div class="tool-sep"></div>
+          <div class="tool-title">SCALE</div>
+          <button id="toolScale" class="tool scale" title="Задать масштаб по двум точкам">📏</button>
         </aside>
 
         <div class="canvas-wrap">
