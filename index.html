@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Калькулятор покрытий</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar card">
+        <label class="btn file-btn">
+          Загрузить план
+          <input id="imageInput" type="file" accept="image/*" />
+        </label>
+
+        <button id="setScaleBtn" class="btn" type="button">Задать масштаб</button>
+
+        <label class="inline-control">
+          Покрытие
+          <select id="materialSelect"></select>
+        </label>
+
+        <button id="exportBtn" class="btn ghost" type="button">Экспорт</button>
+
+        <div id="scaleDistanceBox" class="scale-box hidden">
+          <label>Введите реальное расстояние (м)
+            <input id="scaleDistanceInput" type="number" min="0.01" step="0.01" value="10" />
+          </label>
+          <button id="applyScaleBtn" class="btn" type="button">Применить</button>
+          <button id="cancelScaleBtn" class="btn ghost" type="button">Отмена</button>
+        </div>
+
+        <div class="meta" id="metaBar">Масштаб: — | Zoom: 100% | Текущий участок: —</div>
+      </header>
+
+      <section class="workspace card">
+        <aside class="toolbar">
+          <div class="tool-title">TOOLS</div>
+          <button id="toolPolygon" class="tool active" title="Полигон: рисование участков">✏️</button>
+          <button id="toolUndo" class="tool" title="Отменить последнюю точку">↩️</button>
+          <button id="toolClear" class="tool" title="Удалить текущий полигон">🧹</button>
+          <button id="toolPan" class="tool" title="Панорама">✋</button>
+          <button id="toolDelete" class="tool danger" title="Удалить выбранный участок">🗑</button>
+
+          <div class="tool-sep"></div>
+          <div class="tool-title">SCALE</div>
+          <button id="toolScale" class="tool scale" title="Задать масштаб по двум точкам">📏</button>
+        </aside>
+
+        <div class="canvas-wrap">
+          <canvas id="canvas"></canvas>
+        </div>
+      </section>
+
+      <section class="estimate card">
+        <table>
+          <thead>
+            <tr>
+              <th>Участок</th>
+              <th>Покрытие</th>
+              <th>Площадь, м²</th>
+              <th>₽/м²</th>
+              <th>Стоимость, ₽</th>
+              <th>Удалить</th>
+            </tr>
+          </thead>
+          <tbody id="estimateBody"></tbody>
+          <tfoot>
+            <tr>
+              <td colspan="4">Итого</td>
+              <td id="estimateTotal">0 ₽</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
