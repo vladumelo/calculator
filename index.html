@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Калькулятор покрытий</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header>
+        <h1>Онлайн‑калькулятор покрытий</h1>
+        <p>
+          Загрузите проект или используйте демо-набор. Для каждого покрытия можно
+          менять стоимость и количество (площадь, объем, штуки), а также перейти
+          к детальному расчету по слоям конструкции.
+        </p>
+      </header>
+
+      <section class="controls">
+        <label class="file-input">
+          JSON проекта
+          <input id="projectFile" type="file" accept="application/json" />
+        </label>
+        <button id="loadDemoBtn" type="button">Загрузить демо-проект</button>
+      </section>
+
+      <section>
+        <h2>Сводная смета покрытий</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Код</th>
+              <th>Покрытие</th>
+              <th>Кол-во</th>
+              <th>Ед.</th>
+              <th>Цена за ед., ₽</th>
+              <th>Итого, ₽</th>
+              <th>Детально</th>
+            </tr>
+          </thead>
+          <tbody id="coverageTableBody"></tbody>
+          <tfoot>
+            <tr>
+              <td colspan="5">Общая стоимость</td>
+              <td id="grandTotal">0 ₽</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </section>
+    </main>
+
+    <dialog id="detailDialog">
+      <form method="dialog" class="dialog-header">
+        <h3 id="detailTitle">Детализация</h3>
+        <button type="submit" class="close-btn">✕</button>
+      </form>
+      <div class="dialog-body">
+        <table>
+          <thead>
+            <tr>
+              <th>Слой</th>
+              <th>Кол-во</th>
+              <th>Ед.</th>
+              <th>Цена за ед., ₽</th>
+              <th>Итого, ₽</th>
+            </tr>
+          </thead>
+          <tbody id="layerTableBody"></tbody>
+          <tfoot>
+            <tr>
+              <td colspan="4">Сумма по слоям</td>
+              <td id="layerTotal">0 ₽</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </dialog>
+
+    <script src="app.js"></script>
+  </body>
+</html>
